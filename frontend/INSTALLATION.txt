@@ -1,0 +1,161 @@
+========================================
+PLACEMENT ELIGIBILITY APP
+QUICK INSTALLATION GUIDE
+========================================
+
+Author: BHARATH M B (7376232AD117)
+Date: 03-02-2026
+Institution: Bannari Amman Institute of Technology
+
+========================================
+PREREQUISITES
+========================================
+
+1. Node.js (v14 or higher) - Download from https://nodejs.org/
+2. Expo CLI - Install with: npm install -g expo-cli
+3. Android Studio (for Android) or Xcode (for iOS)
+
+========================================
+INSTALLATION STEPS
+========================================
+
+1. Extract the ZIP file to your desired location
+
+2. Open Terminal/Command Prompt and navigate to the project folder:
+   cd placement-app
+
+3. Install dependencies:
+   npm install
+   
+   (This may take 2-3 minutes)
+
+4. Start the application:
+   npm start
+   
+   OR
+   
+   expo start
+
+5. Run the app:
+   - For Android: Press 'a' or use Expo Go app
+   - For iOS: Press 'i' or use Expo Go app
+   - For Web: Press 'w'
+
+========================================
+DEMO CREDENTIALS
+========================================
+
+Student Account:
+Email: student@bitsathy.ac.in
+Password: password123
+
+Admin Account:
+Email: admin@bitsathy.ac.in
+Password: admin123
+
+========================================
+PROJECT STRUCTURE
+========================================
+
+placement-app/
+├── App.js                    # Main entry point
+├── package.json              # Dependencies
+├── README.md                 # Detailed documentation
+├── src/
+│   ├── screens/             # All UI screens
+│   │   ├── LoginScreen.js
+│   │   ├── StudentHomeScreen.js
+│   │   ├── CompanyListScreen.js
+│   │   ├── EligibilityResultScreen.js
+│   │   ├── StudentProfileScreen.js
+│   │   ├── AdminDashboardScreen.js
+│   │   └── CompanyManagementScreen.js
+│   └── data/
+│       └── mockData.js      # Sample data
+└── database/
+    └── schema.sql           # SQL database schema
+
+========================================
+DATABASE SETUP (OPTIONAL - FOR PRODUCTION)
+========================================
+
+The app currently uses local storage (AsyncStorage) for demo purposes.
+
+For production with MySQL/PostgreSQL:
+
+1. Create database:
+   CREATE DATABASE placement_app;
+
+2. Import schema:
+   mysql -u username -p placement_app < database/schema.sql
+   
+   OR for PostgreSQL:
+   psql -U username -d placement_app -f database/schema.sql
+
+========================================
+FEATURES
+========================================
+
+STUDENT:
+✓ Login and profile management
+✓ Update CGPA, backlogs, department
+✓ View all companies
+✓ Check eligibility for each company
+✓ View reasons for non-eligibility
+✓ Dashboard with statistics
+
+ADMIN:
+✓ Admin dashboard with charts
+✓ Add/Edit/Delete companies
+✓ Set eligibility criteria (CGPA, backlogs, departments)
+✓ View student statistics
+
+========================================
+TROUBLESHOOTING
+========================================
+
+Issue: Dependencies not installing
+Solution: 
+  rm -rf node_modules package-lock.json
+  npm install
+
+Issue: Port already in use
+Solution: 
+  npx react-native start --reset-cache
+
+Issue: App not connecting
+Solution: 
+  - Check if devices are on same network
+  - Try: expo start --tunnel
+
+========================================
+IMPORTANT NOTES
+========================================
+
+1. This is a MINI PROJECT for college assessment
+2. Currently uses mock data (no real backend)
+3. Database schema provided for future integration
+4. All data is stored locally on the device
+5. Internet connection required for app initialization
+
+========================================
+SUPPORT & CONTACT
+========================================
+
+For any issues or questions:
+
+Name: BHARATH M B
+Register No: 7376232AD117
+Email: bharathmb.ad23@bitsathy.ac.in
+Department: AI & Data Science
+Year: III Year / VI Semester
+
+Institution:
+Bannari Amman Institute of Technology
+Sathyamangalam
+
+========================================
+ENJOY THE APP!
+========================================
+
+Read README.md for detailed documentation.

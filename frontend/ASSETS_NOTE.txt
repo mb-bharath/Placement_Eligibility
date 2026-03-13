@@ -1,0 +1,44 @@
+=====================================
+ASSETS FOLDER NOTE
+=====================================
+
+The Expo project requires an assets folder with the following files:
+- icon.png (App icon - 1024x1024)
+- splash.png (Splash screen)
+- adaptive-icon.png (Android adaptive icon)
+- favicon.png (Web favicon)
+
+=====================================
+HOW TO ADD ASSETS
+=====================================
+
+1. Create an 'assets' folder in the project root
+2. Add your app icon (icon.png) - 1024x1024 pixels
+3. Add splash screen (splash.png) - 1242x2436 pixels
+4. Add adaptive icon (adaptive-icon.png) - 1024x1024 pixels
+5. Add favicon (favicon.png) - 48x48 pixels
+
+=====================================
+USING DEFAULT ASSETS
+=====================================
+
+If you don't have custom assets, Expo will use default ones.
+The app will still work without custom assets.
+
+To generate icons quickly:
+- Use online tools like https://icon.kitchen/
+- Upload your logo/design
+- Download generated icon pack
+- Place in assets folder
+
+=====================================
+CURRENT STATUS
+=====================================
+
+Assets folder is not included in this package.
+The app will use Expo defaults until you add custom assets.
+
+This is perfectly fine for development and testing.
+Add custom assets only when preparing for production release.
+
+=====================================

@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Placement Eligibility App",
+    "slug": "placement-eligibility-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#6200ee"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bitsathy.placementapp"
+    },
+    "android": {
+      "package": "com.bitsathy.placementapp",
+      "permissions": [
+        "INTERNET"
+      ]
+    }
+  }
+}
