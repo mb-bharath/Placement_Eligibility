@@ -76,15 +76,10 @@ expo start
 - **iOS:** Press `i` in the terminal or scan QR code with Expo Go app (Mac only)
 - **Web:** Press `w` to run in browser
 
-## 🔐 Demo Credentials
+## Login
 
-### Student Account
-- **Email:** student@bitsathy.ac.in
-- **Password:** password123
-
-### Admin Account
-- **Email:** admin@bitsathy.ac.in
-- **Password:** admin123
+- **Students:** register and login normally.
+- **Admin:** login only with the single account configured in `backend/.env` (`ADMIN_EMAIL` + `ADMIN_PASSWORD`).
 
 ## 📁 Project Structure
 

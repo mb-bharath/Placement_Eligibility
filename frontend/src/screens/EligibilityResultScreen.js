@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Card, Chip } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { apiFetch } from '../config/api';
 import {
   demoStudent,

@@ -42,7 +42,7 @@ export default function RegisterScreen({ navigation }) {
 
       await AsyncStorage.setItem('token', data.token);
       await AsyncStorage.setItem('user', JSON.stringify(data.user));
-      navigation.replace('StudentHome');
+      navigation.replace('StudentApp');
     } catch (err) {
       Alert.alert('Error', 'Unable to connect to server');
     } finally {
@@ -106,7 +106,7 @@ export default function RegisterScreen({ navigation }) {
 
         <Button
           mode="text"
-          onPress={() => navigation.navigate('RoleSelect')}
+          onPress={() => navigation.navigate('Login')}
           style={styles.linkButton}
         >
           Back

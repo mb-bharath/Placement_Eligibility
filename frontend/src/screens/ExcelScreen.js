@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, Text, ScrollView, Alert, Linking } from 'react-native';
-import { Card, Button, TextInput } from 'react-native-paper';
+import { Card, Button } from 'react-native-paper';
 import { apiFetch, buildApiUrl, getAuthToken } from '../config/api';
 import { demoCompanies } from '../data/demoData';
 
 export default function ExcelScreen() {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [sheetUrl, setSheetUrl] = useState('');
 
   useEffect(() => {
     loadCompanies();
@@ -40,7 +39,9 @@ export default function ExcelScreen() {
     return {
       uri: file.uri,
       name: file.name || 'students.xlsx',
-      type: file.mimeType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      type:
+        file.mimeType ||
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     };
   };
 
@@ -72,30 +73,6 @@ export default function ExcelScreen() {
     }
   };
 
-  const importFromGoogleSheet = async () => {
-    if (!sheetUrl.trim()) {
-      Alert.alert('Error', 'Please paste a Google Sheet link');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { response, data } = await apiFetch('/excel/import-google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sheetUrl: sheetUrl.trim() }),
-      });
-      if (!response.ok || !data.success) {
-        throw new Error(data.message || 'Import failed');
-      }
-      Alert.alert('Success', data.message || 'Import complete');
-    } catch (err) {
-      Alert.alert('Error', err.message || 'Unable to import');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const openLink = async (path) => {
     const token = await getAuthToken();
     const url = token
@@ -113,42 +90,30 @@ export default function ExcelScreen() {
     <ScrollView style={styles.container}>
       <Card style={styles.card}>
         <Card.Content>
-          <Text style={styles.title}>Excel / Google Sheet</Text>
+          <Text style={styles.title}>Excel</Text>
           <Text style={styles.subtitle}>Bulk import students and export lists</Text>
 
-          <Button mode="outlined" style={styles.button} onPress={() => openLink('/excel/template')}>
+          <Button
+            mode="outlined"
+            style={styles.button}
+            onPress={() => openLink('/excel/template')}
+          >
             Download Template
           </Button>
-          <Button mode="contained" style={styles.button} onPress={importStudents} loading={loading}>
-            Import Students
-          </Button>
-          <Button mode="outlined" style={styles.button} onPress={() => openLink('/excel/export-students')}>
-            Export All Students
-          </Button>
-        </Card.Content>
-      </Card>
-
-      <Card style={styles.card}>
-        <Card.Content>
-          <Text style={styles.sectionTitle}>Google Sheet Import</Text>
-          <Text style={styles.helperText}>
-            Share the sheet as “Anyone with the link” and paste the URL below.
-          </Text>
-          <TextInput
-            label="Google Sheet URL"
-            value={sheetUrl}
-            onChangeText={setSheetUrl}
-            mode="outlined"
-            style={styles.input}
-            autoCapitalize="none"
-          />
           <Button
             mode="contained"
             style={styles.button}
-            onPress={importFromGoogleSheet}
+            onPress={importStudents}
             loading={loading}
           >
-            Import From Google Sheet
+            Import Students
+          </Button>
+          <Button
+            mode="outlined"
+            style={styles.button}
+            onPress={() => openLink('/excel/export-students')}
+          >
+            Export All Students
           </Button>
         </Card.Content>
       </Card>
@@ -159,7 +124,10 @@ export default function ExcelScreen() {
           {companies.map((c) => (
             <View key={c._id} style={styles.companyRow}>
               <Text style={styles.companyName}>{c.name}</Text>
-              <Button mode="text" onPress={() => openLink(`/excel/export-eligible/${c._id}`)}>
+              <Button
+                mode="text"
+                onPress={() => openLink(`/excel/export-eligible/${c._id}`)}
+              >
                 Export
               </Button>
             </View>
@@ -199,14 +167,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
   },
-  helperText: {
-    color: '#666',
-    fontSize: 12,
-    marginBottom: 10,
-  },
-  input: {
-    marginBottom: 10,
-  },
   companyRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -220,3 +180,4 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+

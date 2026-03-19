@@ -1,30 +1,20 @@
-import React, { useContext } from 'react';
-import { View, StyleSheet, Text, ImageBackground, KeyboardAvoidingView, Platform } from 'react-native';
-import { Button, Switch, useTheme } from 'react-native-paper';
-import { ThemeContext } from '../theme';
+import React from 'react';
+import { View, StyleSheet, Text, ImageBackground, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { Button, useTheme } from 'react-native-paper';
 
 export default function RoleSelectScreen({ navigation }) {
-  const { isDark, toggleTheme } = useContext(ThemeContext);
   const theme = useTheme();
 
-  return (
-    <ImageBackground
-      source={{ uri: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800' }}
-      style={styles.background}
-      blurRadius={3}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
-      >
-        <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-          <View style={styles.themeRow}>
-            <Text style={[styles.themeLabel, { color: theme.colors.onSurface }]}>
-              {isDark ? 'Dark Theme' : 'Light Theme'}
-            </Text>
-            <Switch value={isDark} onValueChange={toggleTheme} />
-          </View>
+  const isWeb = Platform.OS === 'web';
 
+  const Container = isWeb ? View : KeyboardAvoidingView;
+  const containerProps = isWeb
+    ? { style: styles.webInner }
+    : { behavior: Platform.OS === 'ios' ? 'padding' : 'height', style: styles.container };
+
+  const content = (
+    <Container {...containerProps}>
+      <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
           <Text style={[styles.title, { color: theme.colors.primary }]}>Placement Portal</Text>
           <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
             Choose your role to continue
@@ -57,8 +47,31 @@ export default function RoleSelectScreen({ navigation }) {
               Admin: admin12345@bitsathy.ac.in / admin12345
             </Text>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+      </View>
+    </Container>
+  );
+
+  if (isWeb) {
+    return (
+      <ScrollView
+        style={[styles.webBackground, { backgroundColor: theme.colors.background }]}
+        contentContainerStyle={[
+          styles.webContent,
+          { backgroundColor: theme.colors.background },
+        ]}
+      >
+        {content}
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ImageBackground
+      source={{ uri: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800' }}
+      style={styles.background}
+      blurRadius={3}
+    >
+      {content}
     </ImageBackground>
   );
 }
@@ -68,6 +81,20 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     height: '100%',
+  },
+  webBackground: {
+    flex: 1,
+    width: '100%',
+  },
+  webContent: {
+    minHeight: '100vh',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  webInner: {
+    width: '100%',
+    alignItems: 'center',
   },
   container: {
     flex: 1,
@@ -123,15 +150,5 @@ const styles = StyleSheet.create({
   demoText: {
     fontSize: 12,
     marginBottom: 4,
-  },
-  themeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  themeLabel: {
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

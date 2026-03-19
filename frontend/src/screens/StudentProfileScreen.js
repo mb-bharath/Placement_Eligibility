@@ -6,13 +6,14 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { TextInput, Button, useTheme } from 'react-native-paper';
+import { TextInput, Button, Dialog, Portal, useTheme } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiFetch, apiJson } from '../config/api';
 import { demoStudent } from '../data/demoData';
 
 export default function StudentProfileScreen({ navigation }) {
   const theme = useTheme();
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const [user, setUser] = useState({
     name: '',
     registerNumber: '',
@@ -141,8 +142,32 @@ export default function StudentProfileScreen({ navigation }) {
     }
   };
 
+  const confirmLogout = async () => {
+    setLogoutOpen(false);
+    await AsyncStorage.multiRemove(['user', 'token']);
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Login', params: { toast: 'Logged out successfully' } }],
+    });
+  };
+
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <Portal>
+        <Dialog visible={logoutOpen} onDismiss={() => setLogoutOpen(false)}>
+          <Dialog.Title>Logout</Dialog.Title>
+          <Dialog.Content>
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>Are you sure you want to logout?</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setLogoutOpen(false)}>Cancel</Button>
+            <Button onPress={confirmLogout} textColor={theme.colors.error}>
+              Logout
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
       <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
         <Text style={[styles.title, { color: theme.colors.primary }]}>Student Profile</Text>
 
@@ -258,6 +283,16 @@ export default function StudentProfileScreen({ navigation }) {
         >
           Save Profile
         </Button>
+
+        <Button
+          mode="outlined"
+          onPress={() => setLogoutOpen(true)}
+          style={[styles.logoutButton, { borderColor: theme.colors.error }]}
+          textColor={theme.colors.error}
+          icon="logout"
+        >
+          Logout
+        </Button>
       </View>
     </ScrollView>
   );
@@ -288,5 +323,9 @@ const styles = StyleSheet.create({
   },
   buttonContent: {
     paddingVertical: 8,
+  },
+  logoutButton: {
+    marginTop: 12,
+    borderRadius: 10,
   },
 });

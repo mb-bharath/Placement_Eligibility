@@ -5,10 +5,9 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Linking,
 } from 'react-native';
-import { Card, Button, Avatar, useTheme } from 'react-native-paper';
+import { Card, Button, Avatar, IconButton, useTheme } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiFetch, API_BASE_URL } from '../config/api';
 import { useFocusEffect } from '@react-navigation/native';
@@ -33,6 +32,7 @@ export default function StudentHomeScreen({ navigation }) {
     total: 0,
     resumeUploaded: false,
     resumeUrl: null,
+    resumeCount: 0,
   });
   const [eligibleCompanies, setEligibleCompanies] = useState([]);
 
@@ -70,16 +70,14 @@ export default function StudentHomeScreen({ navigation }) {
       });
 
       if (docs.response.ok && docs.data && docs.data.success) {
-        const hasResume = (docs.data.documents || []).some(
-          (d) => d.documentType === 'resume'
-        );
-        const resumeDoc = (docs.data.documents || []).find(
-          (d) => d.documentType === 'resume'
-        );
+        const resumeDocs = (docs.data.documents || []).filter((d) => d.documentType === 'resume');
+        const hasResume = resumeDocs.length > 0;
+        const resumeDoc = resumeDocs[0];
         setDocuments({
           total: docs.data.count || 0,
           resumeUploaded: hasResume,
           resumeUrl: resumeDoc ? resumeDoc.fileUrl : null,
+          resumeCount: resumeDocs.length,
         });
       }
 
@@ -104,6 +102,7 @@ export default function StudentHomeScreen({ navigation }) {
         total: storedResumeUrl ? 1 : 0,
         resumeUploaded: !!storedResumeUrl,
         resumeUrl: storedResumeUrl || demoResumeUrl,
+        resumeCount: storedResumeUrl ? 1 : 0,
       });
     }
   };
@@ -116,6 +115,9 @@ export default function StudentHomeScreen({ navigation }) {
   const normalizeFileUrl = (url) => {
     if (!url) return url;
     const baseOrigin = getBaseOrigin();
+    if (url.startsWith('/')) {
+      return `${baseOrigin}${url}`;
+    }
     if (url.includes('localhost:5000')) {
       return url.replace('http://localhost:5000', baseOrigin);
     }
@@ -127,37 +129,10 @@ export default function StudentHomeScreen({ navigation }) {
 
   const openResume = async () => {
     if (!documents.resumeUrl) {
-      navigation.navigate('ResumeUpload');
+      navigation.navigate('ResumeTab', { screen: 'ResumeUpload' });
       return;
     }
-    const url = normalizeFileUrl(documents.resumeUrl);
-    const supported = await Linking.canOpenURL(url);
-    if (!supported) {
-      Alert.alert('Resume', 'Unable to open resume URL');
-      return;
-    }
-    Linking.openURL(url);
-  };
-
-  const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          onPress: async () => {
-            await AsyncStorage.multiRemove(['user', 'token']);
-            setUser(null);
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'RoleSelect' }],
-            });
-          },
-        },
-      ]
-    );
+    navigation.navigate('ResumeTab', { screen: 'StudentDocuments' });
   };
 
   if (!user) {
@@ -174,22 +149,36 @@ export default function StudentHomeScreen({ navigation }) {
       contentContainerStyle={styles.containerContent}
     >
       <View style={[styles.header, { backgroundColor: theme.colors.primary }]}>
-        <Avatar.Text 
-          size={80} 
-          label={user.name ? user.name.substring(0, 2).toUpperCase() : 'ST'} 
-          style={[styles.avatar, { backgroundColor: theme.colors.onPrimary }]}
-        />
-        <Text style={[styles.welcomeText, { color: theme.colors.onPrimary }]}>
-          Welcome, {user.name}!
-        </Text>
-        <Text style={[styles.regText, { color: theme.colors.onPrimary }]}>
-          {user.registerNumber}
-        </Text>
+        <View style={styles.headerTopRow}>
+          <Text style={[styles.headerTopTitle, { color: theme.colors.onPrimary }]}>
+            Student Dashboard
+          </Text>
+          <IconButton
+            icon="bell-outline"
+            iconColor={theme.colors.onPrimary}
+            size={22}
+            style={styles.headerBell}
+            onPress={() => navigation.navigate('StudentNotifications')}
+          />
+        </View>
+
+        <View style={styles.headerCenter}>
+          <View style={styles.headerAvatarCircle}>
+            <Avatar.Icon size={58} icon="account" style={styles.headerAvatarIcon} color="#6A00FF" />
+          </View>
+          <Text style={[styles.welcomeText, { color: theme.colors.onPrimary }]}>
+            Hi {String(user.name || 'Student').toUpperCase()},
+          </Text>
+          <Text style={[styles.subHeaderText, { color: theme.colors.onPrimary }]}>
+            Here's your dashboard overview
+          </Text>
+        </View>
       </View>
 
       <View style={styles.statsContainer}>
         <Card style={[styles.statCard, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
+            <Avatar.Icon size={40} icon="office-building" style={styles.statIcon} color="#fff" />
             <Text style={[styles.statNumber, { color: theme.colors.onSurface }]}>{stats.total}</Text>
             <Text style={[styles.statLabel, { color: theme.colors.onSurfaceVariant }]}>
               Total Companies
@@ -205,6 +194,7 @@ export default function StudentHomeScreen({ navigation }) {
           ]}
         >
           <Card.Content>
+            <Avatar.Icon size={40} icon="account-check" style={styles.statIcon} color="#fff" />
             <Text
               style={[
                 styles.statNumber,
@@ -227,6 +217,7 @@ export default function StudentHomeScreen({ navigation }) {
           ]}
         >
           <Card.Content>
+            <Avatar.Icon size={40} icon="account-remove" style={styles.statIcon} color="#fff" />
             <Text
               style={[
                 styles.statNumber,
@@ -243,6 +234,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <Card style={[styles.statCard, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
+            <Avatar.Icon size={40} icon="clipboard-text" style={styles.statIcon} color="#fff" />
             <Text style={[styles.statNumber, { color: theme.colors.onSurface }]}>{stats.applied}</Text>
             <Text style={[styles.statLabel, { color: theme.colors.onSurfaceVariant }]}>
               Applied
@@ -252,6 +244,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <Card style={[styles.statCard, { backgroundColor: theme.colors.surface }]}>
           <Card.Content>
+            <Avatar.Icon size={40} icon="clipboard-check" style={styles.statIcon} color="#fff" />
             <Text style={[styles.statNumber, { color: theme.colors.onSurface }]}>{stats.shortlisted}</Text>
             <Text style={[styles.statLabel, { color: theme.colors.onSurfaceVariant }]}>
               Shortlisted
@@ -274,7 +267,7 @@ export default function StudentHomeScreen({ navigation }) {
             onPress={openResume}
             style={styles.resumeButton}
           >
-            {documents.resumeUploaded ? 'Open Resume' : 'Upload Resume'}
+            {documents.resumeUploaded ? `View Resumes (${documents.resumeCount})` : 'Upload Resume'}
           </Button>
         </Card.Content>
       </Card>
@@ -307,7 +300,12 @@ export default function StudentHomeScreen({ navigation }) {
               </View>
               <Button
                 mode="outlined"
-                onPress={() => navigation.navigate('ResumeUpload')}
+                onPress={() =>
+                  navigation.navigate('ResumeTab', {
+                    screen: 'ResumeUpload',
+                    params: { companyId: c._id, company: c },
+                  })
+                }
                 compact
               >
                 Apply
@@ -320,7 +318,7 @@ export default function StudentHomeScreen({ navigation }) {
       <View style={styles.menuContainer}>
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('StudentProfile')}
+          onPress={() => navigation.navigate('ProfileTab', { screen: 'StudentProfile' })}
         >
           <Avatar.Icon size={50} icon="account" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>My Profile</Text>
@@ -328,7 +326,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('CompanyList')}
+          onPress={() => navigation.navigate('CompaniesTab', { screen: 'CompanyList' })}
         >
           <Avatar.Icon size={50} icon="office-building" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Companies</Text>
@@ -336,7 +334,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('EligibilityResult')}
+          onPress={() => navigation.navigate('CompaniesTab', { screen: 'EligibilityResult' })}
         >
           <Avatar.Icon size={50} icon="clipboard-check" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Check Eligibility</Text>
@@ -344,7 +342,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('EligibilityStatus')}
+          onPress={() => navigation.navigate('CompaniesTab', { screen: 'EligibilityStatus' })}
         >
           <Avatar.Icon size={50} icon="shield-check" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Eligibility Status</Text>
@@ -352,7 +350,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('ResumeUpload')}
+          onPress={() => navigation.navigate('ResumeTab', { screen: 'ResumeUpload' })}
         >
           <Avatar.Icon size={50} icon="file-upload" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Resume Upload</Text>
@@ -360,7 +358,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('ResumeStrength')}
+          onPress={() => navigation.navigate('ResumeTab', { screen: 'ResumeStrength' })}
         >
           <Avatar.Icon size={50} icon="file-chart" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Resume Strength</Text>
@@ -368,7 +366,7 @@ export default function StudentHomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('AcademicData')}
+          onPress={() => navigation.navigate('ProfileTab', { screen: 'AcademicData' })}
         >
           <Avatar.Icon size={50} icon="school" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Academic Data</Text>
@@ -382,15 +380,6 @@ export default function StudentHomeScreen({ navigation }) {
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Notifications</Text>
         </TouchableOpacity>
       </View>
-
-      <Button
-        mode="outlined"
-        onPress={handleLogout}
-        style={[styles.logoutButton, { borderColor: theme.colors.error }]}
-        icon="logout"
-      >
-        Logout
-      </Button>
     </ScrollView>
   );
 }
@@ -403,28 +392,58 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
   },
   header: {
-    padding: 30,
-    alignItems: 'center',
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
+    paddingTop: 24,
+    paddingHorizontal: 18,
+    paddingBottom: 60,
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
   },
-  avatar: {
-    marginBottom: 15,
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerTopTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  headerCenter: {
+    alignItems: 'center',
+    marginTop: 18,
+  },
+  headerAvatarCircle: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    elevation: 3,
+  },
+  headerAvatarIcon: {
+    backgroundColor: 'transparent',
+  },
+  headerBell: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 5,
+    fontSize: 26,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
   },
-  regText: {
+  subHeaderText: {
     fontSize: 14,
+    opacity: 0.92,
+    textAlign: 'center',
   },
   statsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-around',
     padding: 20,
-    marginTop: -40,
+    marginTop: -55,
   },
   statCard: {
     width: '30%',
@@ -432,6 +451,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 15,
     elevation: 4,
+  },
+  statIcon: {
+    backgroundColor: '#6A00FF',
+    alignSelf: 'center',
+    marginBottom: 10,
   },
   statNumber: {
     fontSize: 32,
@@ -460,10 +484,6 @@ const styles = StyleSheet.create({
   menuText: {
     fontSize: 12,
     textAlign: 'center',
-  },
-  logoutButton: {
-    margin: 20,
-    borderRadius: 10,
   },
   resumeCard: {
     marginHorizontal: 20,

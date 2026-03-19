@@ -1,95 +1,1097 @@
-// ============================================================
-// server.js  —  Placement Eligibility App Backend  v2.0
-// Tech Stack : Node.js + Express + MongoDB + JWT + Multer
-// NEW: Applications, Resume Strength, Notifications, Excel
-// ============================================================
-
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
+const morgan = require('morgan');
+const multer = require('multer');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { v4: uuidv4 } = require('uuid');
+const mongoose = require('mongoose');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const fs = require('fs');
+
+require('dotenv').config();
+
 const User = require('./models/User');
+const Student = require('./models/Student');
+const Company = require('./models/Company');
+const Application = require('./models/Application');
+const Document = require('./models/Document');
+const Notification = require('./models/Notification');
 
 const app = express();
-
-// ── Middleware ───────────────────────────────────────────────
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// ── Routes ───────────────────────────────────────────────────
-app.use('/api/auth',           require('./routes/authRoutes'));
-app.use('/api/students',       require('./routes/studentRoutes'));
-app.use('/api/companies',      require('./routes/companyRoutes'));
-app.use('/api/admin',          require('./routes/adminRoutes'));
-app.use('/api/documents',      require('./routes/documentRoutes'));
-app.use('/api/applications',   require('./routes/applicationRoutes'));   // NEW
-app.use('/api/notifications',  require('./routes/notificationRoutes'));  // NEW
-app.use('/api/excel',          require('./routes/excelRoutes'));         // NEW
-
-// ── Health Check ─────────────────────────────────────────────
-app.get('/', (req, res) => {
-  res.json({
-    message: '🎓 BIT Sathy Placement Eligibility API v2.0',
-    features: [
-      '✅ JWT Auth (Student + Admin)',
-      '✅ Eligibility Check (CGPA + 10th% + 12th% + Arrears + Dept)',
-      '✅ File Uploader (PDF, JPG, PNG — max 5MB)',
-      '✅ Resume Strength Checker (AI scoring ≥ 60% to apply)',
-      '✅ Application System (apply per company, one resume per company)',
-      '✅ Email Notifications (drive alerts, shortlist, results)',
-      '✅ Admin: Add/Edit/Delete Companies + Set Criteria',
-      '✅ Admin: Bulk Import Students from Excel',
-      '✅ Admin: Export Eligible Students as Excel',
-      '✅ Placement Tracker (mark placed, stats)',
-    ],
-  });
-});
-
-// ── Global Error Handler ─────────────────────────────────────
-app.use((err, req, res, next) => {
-  console.error('❌ Server Error:', err.message);
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.message || 'Internal Server Error',
-  });
-});
-
-// ── Connect & Start ──────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/placement_db';
+const HOST = process.env.HOST || '0.0.0.0';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_me';
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '').trim();
+const ADMIN_NAME = String(process.env.ADMIN_NAME || 'Admin').trim() || 'Admin';
+const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_DB = process.env.MONGODB_DB || 'placement_app';
 
-mongoose
-  .connect(MONGO_URI)
-  .then(() => {
-    console.log('✅ MongoDB Connected');
+let mongoReady = false;
 
-    const ensureDemoAdmin = async () => {
-      const demoEmail = 'admin12345@bitsathy.ac.in';
-      const existing = await User.findOne({ email: demoEmail });
-      if (existing) return;
+app.use(cors());
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
 
-      await User.create({
-        name: 'Demo Admin',
-        email: demoEmail,
-        password: 'admin12345',
-        role: 'admin',
-      });
-      console.log('👤 Demo admin created:', demoEmail);
-    };
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadDir));
 
-    ensureDemoAdmin().catch((err) => {
-      console.error('❌ Demo admin creation error:', err.message);
-    });
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, `${Date.now()}_${safeName}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const name = String(file.originalname || '').toLowerCase();
+    const isPdf = name.endsWith('.pdf');
+    if (!isPdf) {
+      const err = new Error('Only PDF files are allowed');
+      err.statusCode = 400;
+      return cb(err);
+    }
+    return cb(null, true);
+  },
+});
 
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running at http://localhost:${PORT}`);
-      console.log(`📋 API Docs: http://localhost:${PORT}/`);
-    });
-  })
-  .catch((err) => {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
+const departments = ['CSE', 'AI&DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'];
+
+const db = {
+  users: [],
+  students: [],
+  companies: [],
+  applications: [],
+  documents: [],
+  notifications: [],
+};
+
+const nowIso = () => new Date().toISOString();
+
+const seed = () => {
+  db.users = [];
+  db.students = [];
+
+  const companySeed = [
+    {
+      name: 'Infosys',
+      jobRole: 'Software Engineer',
+      package: '6 LPA',
+      minCGPA: 7.0,
+      maxBacklogs: 0,
+      eligibleDepartments: ['CSE', 'AI&DS', 'IT'],
+      registrationDeadline: '2026-03-20',
+      driveDate: '2026-03-25',
+      driveStatus: 'open',
+      description: 'Infosys campus hiring',
+    },
+    {
+      name: 'TCS',
+      jobRole: 'Ninja Developer',
+      package: '4 LPA',
+      minCGPA: 6.5,
+      maxBacklogs: 0,
+      eligibleDepartments: ['CSE', 'ECE', 'MECH', 'EEE', 'CIVIL', 'IT', 'AI&DS'],
+      registrationDeadline: '2026-03-18',
+      driveDate: '2026-03-22',
+      driveStatus: 'open',
+      description: 'TCS Ninja drive',
+    },
+    {
+      name: 'Wipro',
+      jobRole: 'Project Engineer',
+      package: '3.5 LPA',
+      minCGPA: 6.0,
+      maxBacklogs: 0,
+      eligibleDepartments: ['CSE', 'IT'],
+      registrationDeadline: '2026-03-21',
+      driveDate: '2026-03-28',
+      driveStatus: 'open',
+      description: 'Wipro campus drive',
+    },
+    {
+      name: 'Zoho',
+      jobRole: 'Backend Developer',
+      package: '8 LPA',
+      minCGPA: 7.5,
+      maxBacklogs: 0,
+      eligibleDepartments: ['CSE', 'AI&DS'],
+      registrationDeadline: '2026-03-19',
+      driveDate: '2026-03-23',
+      driveStatus: 'open',
+      description: 'Zoho backend drive',
+    },
+    {
+      name: 'HCL',
+      jobRole: 'Software Trainee',
+      package: '4.5 LPA',
+      minCGPA: 6.5,
+      maxBacklogs: 0,
+      eligibleDepartments: ['CSE', 'ECE', 'MECH', 'EEE', 'CIVIL', 'IT', 'AI&DS'],
+      registrationDeadline: '2026-03-22',
+      driveDate: '2026-03-26',
+      driveStatus: 'open',
+      description: 'HCL campus hiring',
+    },
+  ];
+
+  db.companies = companySeed.map((c) => ({
+    _id: uuidv4(),
+    ...c,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  }));
+
+  db.notifications.push(
+    {
+      _id: uuidv4(),
+      title: 'Zoho Drive Registration',
+      message: 'Apply before March 19',
+      department: 'ALL',
+      createdAt: nowIso(),
+      isReadBy: [],
+    },
+    {
+      _id: uuidv4(),
+      title: 'TCS Drive Update',
+      message: 'Drive date updated to March 22',
+      department: 'ALL',
+      createdAt: nowIso(),
+      isReadBy: [],
+    }
+  );
+};
+
+const signToken = (user) => {
+  return jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+};
+
+const getAuthToken = (req) => {
+  const header = req.headers.authorization || '';
+  if (header.startsWith('Bearer ')) return header.slice(7);
+  if (req.query && req.query.token) return req.query.token;
+  return null;
+};
+
+const requireAuth = (req, res, next) => {
+  const token = getAuthToken(req);
+  if (!token) return res.status(401).json({ success: false, message: 'Missing token' });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload;
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, message: 'Invalid token' });
+  }
+};
+
+const requireRole = (role) => (req, res, next) => {
+  if (!req.user || req.user.role !== role) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+  next();
+};
+
+const findStudentByUserId = (userId) => db.students.find((s) => s.userId === userId);
+
+const normalizeCompanyDates = (company) => ({
+  ...company,
+  driveDate: company.driveDate ? new Date(company.driveDate).toISOString() : null,
+  registrationDeadline: company.registrationDeadline ? new Date(company.registrationDeadline).toISOString() : null,
+});
+
+const computeEligibility = (student, company) => {
+  const reasons = [];
+  const passedChecks = {};
+
+  if (!student || !company) {
+    return { isEligible: false, reasons: ['Missing data'], passedChecks };
+  }
+
+  const cgpaOk = Number(student.cgpa) >= Number(company.minCGPA);
+  passedChecks.cgpa = cgpaOk;
+  if (!cgpaOk) reasons.push(`CGPA must be at least ${company.minCGPA}`);
+
+  const backlogsOk = Number(student.backlogs || 0) <= Number(company.maxBacklogs || 0);
+  passedChecks.backlogs = backlogsOk;
+  if (!backlogsOk) reasons.push(`Backlogs must be at most ${company.maxBacklogs}`);
+
+  const deptOk = (company.eligibleDepartments || []).includes(student.department);
+  passedChecks.department = deptOk;
+  if (!deptOk) reasons.push('Department not eligible');
+
+  if (company.tenthPercentageMin != null) {
+    const tenthOk = Number(student.tenthPercentage || 0) >= Number(company.tenthPercentageMin);
+    passedChecks.tenthPercentage = tenthOk;
+    if (!tenthOk) reasons.push(`10th % must be at least ${company.tenthPercentageMin}`);
+  }
+
+  if (company.twelfthPercentageMin != null) {
+    const twelfthOk = Number(student.twelfthPercentage || 0) >= Number(company.twelfthPercentageMin);
+    passedChecks.twelfthPercentage = twelfthOk;
+    if (!twelfthOk) reasons.push(`12th % must be at least ${company.twelfthPercentageMin}`);
+  }
+
+  return { isEligible: reasons.length === 0, reasons, passedChecks };
+};
+
+app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok' }));
+
+app.get('/api/meta', (req, res) => {
+  return res.json({
+    success: true,
+    version: process.env.npm_package_version || null,
+    mongo: {
+      ready: mongoReady,
+      db: mongoReady ? mongoose.connection.name : null,
+    },
+    features: {
+      deleteDocumentById: true,
+      deleteResumeByCompany: true,
+      adminStudentDetails: true,
+      pdfOnlyUploads: true,
+      maxUploadSizeMb: 5,
+    },
   });
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  const { name, registerNumber, email, password } = req.body || {};
+  if (!name || !registerNumber || !email || !password) {
+    return res.status(400).json({ success: false, message: 'Missing required fields' });
+  }
+  const emailLower = String(email).toLowerCase();
+  if (ADMIN_EMAIL && emailLower === ADMIN_EMAIL) {
+    return res.status(409).json({ success: false, message: 'Email already registered' });
+  }
+  if (db.users.find((u) => u.email.toLowerCase() === emailLower)) {
+    return res.status(409).json({ success: false, message: 'Email already registered' });
+  }
+  if (mongoReady) {
+    const existing = await User.findOne({ email: emailLower }).lean();
+    if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
+  }
+
+  const user = {
+    id: uuidv4(),
+    email: emailLower,
+    passwordHash: bcrypt.hashSync(password, 10),
+    role: 'student',
+    name,
+    registerNumber,
+    createdAt: nowIso(),
+  };
+
+  const student = {
+    _id: uuidv4(),
+    userId: user.id,
+    name,
+    registerNumber,
+    department: 'AI&DS',
+    cgpa: 7.0,
+    backlogs: 0,
+    phone: '',
+    batch: '',
+    historyOfArrears: 0,
+    tenthPercentage: 0,
+    twelfthPercentage: 0,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  try {
+    if (mongoReady) {
+      await User.create(user);
+      await Student.create(student);
+    }
+    db.users.push(user);
+    db.students.push(student);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to register user' });
+  }
+
+  const token = signToken(user);
+  return res.json({
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name,
+      registerNumber: user.registerNumber,
+      department: student.department,
+      cgpa: student.cgpa,
+      backlogs: student.backlogs,
+    },
+  });
+});
+
+app.post('/api/auth/create-admin', (req, res) => {
+  return res.status(403).json({ success: false, message: 'Admin creation is disabled' });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body || {};
+  const emailLower = String(email || '').toLowerCase();
+
+  if (ADMIN_EMAIL && emailLower === ADMIN_EMAIL) {
+    const inputPassword = String(password || '').trim();
+    const ok = ADMIN_PASSWORD
+      ? ADMIN_PASSWORD.startsWith('$2')
+        ? bcrypt.compareSync(inputPassword, ADMIN_PASSWORD)
+        : inputPassword === ADMIN_PASSWORD
+      : false;
+
+    if (!ok) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    const adminUser = {
+      id: 'admin_env',
+      email: ADMIN_EMAIL,
+      role: 'admin',
+      name: ADMIN_NAME,
+    };
+    const token = signToken(adminUser);
+    return res.json({ success: true, token, user: adminUser });
+  }
+
+  const user = db.users.find((u) => u.email.toLowerCase() === emailLower);
+  if (!user || user.role !== 'student' || !bcrypt.compareSync(password || '', user.passwordHash)) {
+    return res.status(401).json({ success: false, message: 'Invalid credentials' });
+  }
+
+  const token = signToken(user);
+  const student = user.role === 'student' ? findStudentByUserId(user.id) : null;
+  return res.json({
+    success: true,
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name,
+      registerNumber: student?.registerNumber,
+      department: student?.department,
+      cgpa: student?.cgpa,
+      backlogs: student?.backlogs,
+    },
+  });
+});
+
+app.get('/api/companies', requireAuth, (req, res) => {
+  return res.json({
+    success: true,
+    companies: db.companies.map(normalizeCompanyDates),
+  });
+});
+
+app.post('/api/companies', requireAuth, requireRole('admin'), async (req, res) => {
+  const payload = req.body || {};
+  if (!payload.name || payload.minCGPA === undefined || payload.maxBacklogs === undefined || !payload.package) {
+    return res.status(400).json({ success: false, message: 'Missing required fields' });
+  }
+
+  const company = {
+    _id: uuidv4(),
+    name: payload.name,
+    minCGPA: Number(payload.minCGPA),
+    maxBacklogs: Number(payload.maxBacklogs),
+    package: payload.package,
+    eligibleDepartments: payload.eligibleDepartments || departments,
+    description: payload.description || '',
+    jobRole: payload.jobRole || '',
+    location: payload.location || '',
+    driveDate: payload.driveDate || null,
+    registrationDeadline: payload.registrationDeadline || null,
+    driveStatus: payload.driveStatus || 'open',
+    tenthPercentageMin: payload.tenthPercentageMin ?? null,
+    twelfthPercentageMin: payload.twelfthPercentageMin ?? null,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  try {
+    if (mongoReady) await Company.create(company);
+    db.companies.unshift(company);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to create company' });
+  }
+  return res.json({ success: true, company: normalizeCompanyDates(company) });
+});
+
+app.put('/api/companies/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const company = db.companies.find((c) => c._id === req.params.id);
+  if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+
+  const payload = req.body || {};
+  const updates = {
+    jobRole: payload.jobRole ?? company.jobRole,
+    location: payload.location ?? company.location,
+    driveDate: payload.driveDate ?? company.driveDate,
+    registrationDeadline: payload.registrationDeadline ?? company.registrationDeadline,
+    driveStatus: payload.driveStatus ?? company.driveStatus,
+    updatedAt: nowIso(),
+  };
+  try {
+    if (mongoReady) await Company.updateOne({ _id: company._id }, { $set: updates });
+    Object.assign(company, updates);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to update company' });
+  }
+
+  return res.json({ success: true, company: normalizeCompanyDates(company) });
+});
+
+app.delete('/api/companies/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  const idx = db.companies.findIndex((c) => c._id === req.params.id);
+  if (idx === -1) return res.status(404).json({ success: false, message: 'Company not found' });
+  const [removed] = db.companies.splice(idx, 1);
+  try {
+    if (mongoReady) await Company.deleteOne({ _id: removed._id });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to delete company' });
+  }
+  return res.json({ success: true });
+});
+
+app.get('/api/students/profile', requireAuth, requireRole('student'), (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  return res.json({ success: true, student });
+});
+
+app.put('/api/students/profile', requireAuth, requireRole('student'), async (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  const payload = req.body || {};
+  const updates = {
+    name: payload.name ?? student.name,
+    registerNumber: payload.registerNumber ?? student.registerNumber,
+    phone: payload.phone ?? student.phone,
+    department: payload.department ?? student.department,
+    batch: payload.batch ?? student.batch,
+    cgpa: payload.cgpa ?? student.cgpa,
+    backlogs: payload.backlogs ?? student.backlogs,
+    historyOfArrears: payload.historyOfArrears ?? student.historyOfArrears,
+    tenthPercentage: payload.tenthPercentage ?? student.tenthPercentage,
+    twelfthPercentage: payload.twelfthPercentage ?? student.twelfthPercentage,
+    updatedAt: nowIso(),
+  };
+  try {
+    if (mongoReady) {
+      await Student.updateOne({ _id: student._id }, { $set: updates });
+    }
+    Object.assign(student, updates);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to update student profile' });
+  }
+  return res.json({ success: true, student });
+});
+
+app.get('/api/students/dashboard', requireAuth, requireRole('student'), (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+
+  const eligibilityResults = db.companies.map((c) => computeEligibility(student, c));
+  const eligibleCount = eligibilityResults.filter((r) => r.isEligible).length;
+  const totalCompanies = db.companies.length;
+  const notEligible = totalCompanies - eligibleCount;
+
+  const studentApps = db.applications.filter((a) => a.studentId === student._id);
+  const applied = studentApps.length;
+  const shortlisted = studentApps.filter((a) => a.status === 'shortlisted').length;
+
+  return res.json({
+    success: true,
+    dashboard: {
+      totalCompanies,
+      eligible: eligibleCount,
+      notEligible,
+      applied,
+      shortlisted,
+    },
+  });
+});
+
+app.get('/api/students/eligible-companies', requireAuth, requireRole('student'), (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+
+  const companies = db.companies.filter((c) => computeEligibility(student, c).isEligible);
+  return res.json({ success: true, companies: companies.map(normalizeCompanyDates) });
+});
+
+app.get('/api/students/eligibility', requireAuth, requireRole('student'), (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+
+  const results = db.companies.map((company) => {
+    const { isEligible, reasons, passedChecks } = computeEligibility(student, company);
+    return {
+      company: normalizeCompanyDates(company),
+      isEligible,
+      reasons,
+      passedChecks,
+    };
+  });
+
+  const eligibleCount = results.filter((r) => r.isEligible).length;
+  return res.json({
+    success: true,
+    summary: { total: results.length, eligible: eligibleCount },
+    studentProfile: {
+      cgpa: student.cgpa,
+      tenthPercentage: student.tenthPercentage,
+      twelfthPercentage: student.twelfthPercentage,
+      backlogs: student.backlogs,
+    },
+    results,
+  });
+});
+
+app.get('/api/documents/my-docs', requireAuth, requireRole('student'), (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  const docs = db.documents.filter((d) => d.studentId === student._id);
+  return res.json({ success: true, count: docs.length, documents: docs });
+});
+
+app.delete('/api/documents/resume/:companyId', requireAuth, requireRole('student'), async (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  const companyId = req.params.companyId;
+
+  const docIndex = db.documents.findIndex(
+    (d) => d.studentId === student._id && d.companyId === companyId && d.documentType === 'resume'
+  );
+  if (docIndex === -1) return res.status(404).json({ success: false, message: 'Resume not found' });
+
+  const [doc] = db.documents.splice(docIndex, 1);
+  try {
+    if (mongoReady) {
+      await Document.deleteOne({ _id: doc._id });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to delete resume' });
+  }
+
+  try {
+    const filename = String(doc.fileUrl || '').split('/uploads/')[1];
+    if (filename) {
+      const filepath = path.join(uploadDir, filename);
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+    }
+  } catch (err) {}
+
+  return res.json({ success: true, message: 'Resume deleted' });
+});
+
+app.delete('/api/documents/:id', requireAuth, requireRole('student'), async (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  const docId = req.params.id;
+
+  const docIndex = db.documents.findIndex((d) => d._id === docId && d.studentId === student._id);
+  if (docIndex === -1) return res.status(404).json({ success: false, message: 'Document not found' });
+
+  const [doc] = db.documents.splice(docIndex, 1);
+  try {
+    if (mongoReady) {
+      await Document.deleteOne({ _id: doc._id });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to delete document' });
+  }
+
+  try {
+    const filename = String(doc.fileUrl || '').split('/uploads/')[1];
+    if (filename) {
+      const filepath = path.join(uploadDir, filename);
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+    }
+  } catch (err) {}
+
+  return res.json({ success: true, message: 'Document deleted' });
+});
+
+app.post('/api/applications/check-resume', requireAuth, requireRole('student'), upload.single('document'), (req, res) => {
+  const resumeScore = Math.floor(45 + Math.random() * 50);
+  const minRequiredScore = 60;
+  const suggestions = [
+    'Add 2-3 impactful project bullet points.',
+    'Quantify achievements with numbers.',
+    'Ensure ATS-friendly formatting.',
+  ];
+  return res.json({ success: true, resumeScore, minRequiredScore, suggestions });
+});
+
+app.post(
+  '/api/applications/apply/:companyId',
+  requireAuth,
+  requireRole('student'),
+  upload.single('document'),
+  async (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  const company = db.companies.find((c) => c._id === req.params.companyId);
+  if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+
+  const resumeScore = Math.floor(40 + Math.random() * 60);
+  const minRequiredScore = 60;
+  if (resumeScore < minRequiredScore) {
+    return res.status(400).json({
+      success: false,
+      message: 'Resume score too low',
+      resumeScore,
+      minRequiredScore,
+    });
+  }
+
+  const existing = db.applications.find((a) => a.studentId === student._id && a.companyId === company._id);
+  if (!existing) {
+    const application = {
+      _id: uuidv4(),
+      studentId: student._id,
+      companyId: company._id,
+      status: 'applied',
+      createdAt: nowIso(),
+    };
+    try {
+      if (mongoReady) await Application.create(application);
+      db.applications.push(application);
+    } catch (err) {
+      return res.status(500).json({ success: false, message: 'Failed to create application' });
+    }
+  }
+
+  if (req.file) {
+    const fileUrl = `/uploads/${req.file.filename}`;
+    const existingDoc = db.documents.find(
+      (d) => d.studentId === student._id && d.companyId === company._id && d.documentType === 'resume'
+    );
+    try {
+      if (existingDoc) {
+        try {
+          const filepath = path.join(uploadDir, req.file.filename);
+          if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+        } catch (err) {}
+        return res.status(409).json({
+          success: false,
+          message: 'Resume already uploaded for this company. Delete the old resume to upload a new one.',
+        });
+      } else {
+        const doc = {
+          _id: uuidv4(),
+          studentId: student._id,
+          companyId: company._id,
+          documentType: 'resume',
+          fileUrl,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        };
+        if (mongoReady) await Document.create(doc);
+        db.documents.push(doc);
+      }
+    } catch (err) {
+      return res.status(500).json({ success: false, message: 'Failed to save document' });
+    }
+  }
+
+  return res.json({ success: true, message: 'Application submitted' });
+});
+
+app.get('/api/applications/stats', requireAuth, requireRole('admin'), (req, res) => {
+  const totalApplications = db.applications.length;
+  const shortlisted = db.applications.filter((a) => a.status === 'shortlisted').length;
+  const selected = db.applications.filter((a) => a.status === 'selected').length;
+  const totalPlaced = selected;
+
+  const deptStats = departments.map((dept) => {
+    const deptStudents = db.students.filter((s) => s.department === dept);
+    const total = deptStudents.length;
+    const placed = deptStudents.filter((s) =>
+      db.applications.some((a) => a.studentId === s._id && a.status === 'selected')
+    ).length;
+    const avgCGPA =
+      total === 0 ? 0 : deptStudents.reduce((sum, s) => sum + Number(s.cgpa || 0), 0) / total;
+    return { _id: dept, total, placed, avgCGPA };
+  });
+
+  return res.json({
+    success: true,
+    stats: {
+      totalStudents: db.students.length,
+      totalCompanies: db.companies.length,
+      totalApplications,
+      shortlisted,
+      selected,
+      totalPlaced,
+      placementRate: db.students.length ? ((totalPlaced / db.students.length) * 100).toFixed(1) : '0.0',
+    },
+    deptStats,
+  });
+});
+
+app.get('/api/admin/stats', requireAuth, requireRole('admin'), (req, res) => {
+  const totalDocuments = db.documents.length;
+  const avgCGPA =
+    db.students.length === 0
+      ? 0
+      : (
+          db.students.reduce((sum, s) => sum + Number(s.cgpa || 0), 0) / db.students.length
+        ).toFixed(2);
+
+  const chart = departments.reduce(
+    (acc, dept) => {
+      const count = db.students.filter((s) => s.department === dept).length;
+      if (count > 0) {
+        acc.labels.push(dept);
+        acc.data.push(count);
+      }
+      return acc;
+    },
+    { labels: [], data: [] }
+  );
+
+  return res.json({
+    success: true,
+    stats: {
+      totalCompanies: db.companies.length,
+      totalStudents: db.students.length,
+      avgCGPA,
+      totalDocuments,
+    },
+    chart,
+  });
+});
+
+app.get('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
+  const users = db.users.map((u) => ({
+    id: u.id,
+    email: u.email,
+    role: u.role,
+    name: u.name,
+    registerNumber: u.registerNumber,
+    createdAt: u.createdAt,
+  }));
+  return res.json({ success: true, users });
+});
+
+app.get('/api/admin/student/:studentId', requireAuth, requireRole('admin'), async (req, res) => {
+  const studentId = req.params.studentId;
+
+  try {
+    let student = db.students.find((s) => s._id === studentId) || null;
+    let user = student ? db.users.find((u) => u.id === student.userId) || null : null;
+    let documents = db.documents.filter((d) => d.studentId === studentId);
+    let applications = db.applications.filter((a) => a.studentId === studentId);
+
+    if (mongoReady) {
+      const studentDoc = await Student.findOne({ _id: studentId }).lean();
+      const userId = studentDoc?.userId || student?.userId || null;
+      const [userDoc, docs, apps] = await Promise.all([
+        userId ? User.findOne({ id: userId }, { _id: 0, passwordHash: 0 }).lean() : Promise.resolve(null),
+        Document.find({ studentId }).lean(),
+        Application.find({ studentId }).lean(),
+      ]);
+      student = studentDoc || student;
+      user = userDoc || user;
+      documents = docs || documents;
+      applications = apps || applications;
+    }
+
+    if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+
+    documents.sort((a, b) =>
+      String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''))
+    );
+    applications.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+    return res.json({
+      success: true,
+      student,
+      user: user ? { id: user.id, email: user.email, role: user.role, name: user.name } : null,
+      documents,
+      applications,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to load student details' });
+  }
+});
+
+app.get('/api/admin/students', requireAuth, requireRole('admin'), (req, res) => {
+  const { department, minCGPA, search } = req.query || {};
+  let students = [...db.students];
+  if (department) {
+    students = students.filter((s) => s.department?.toLowerCase() === String(department).toLowerCase());
+  }
+  if (minCGPA) {
+    students = students.filter((s) => Number(s.cgpa || 0) >= Number(minCGPA));
+  }
+  if (search) {
+    const query = String(search).toLowerCase();
+    students = students.filter((s) => {
+      const user = db.users.find((u) => u.id === s.userId);
+      return (
+        s.name?.toLowerCase().includes(query) ||
+        s.registerNumber?.toLowerCase().includes(query) ||
+        user?.email?.toLowerCase().includes(query)
+      );
+    });
+  }
+
+  return res.json({ success: true, students });
+});
+
+app.get('/api/admin/eligible-students/:companyId', requireAuth, requireRole('admin'), (req, res) => {
+  const company = db.companies.find((c) => c._id === req.params.companyId);
+  if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+
+  const students = db.students.filter((s) => computeEligibility(s, company).isEligible);
+  return res.json({ success: true, students });
+});
+
+app.get('/api/notifications/my', requireAuth, requireRole('student'), (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  const notifications = db.notifications.map((n) => ({
+    _id: n._id,
+    title: n.title,
+    message: n.message,
+    createdAt: n.createdAt,
+    isRead: n.isReadBy.includes(student._id),
+  }));
+  return res.json({ success: true, notifications });
+});
+
+app.put('/api/notifications/read-all', requireAuth, requireRole('student'), async (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  try {
+    db.notifications.forEach((n) => {
+      if (!n.isReadBy.includes(student._id)) n.isReadBy.push(student._id);
+    });
+    if (mongoReady) {
+      await Notification.updateMany(
+        { isReadBy: { $ne: student._id } },
+        { $addToSet: { isReadBy: student._id } }
+      );
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to update notifications' });
+  }
+  return res.json({ success: true });
+});
+
+app.put('/api/notifications/:id/read', requireAuth, requireRole('student'), async (req, res) => {
+  const student = findStudentByUserId(req.user.id);
+  if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+  const notification = db.notifications.find((n) => n._id === req.params.id);
+  if (!notification) return res.status(404).json({ success: false, message: 'Notification not found' });
+  try {
+    if (!notification.isReadBy.includes(student._id)) notification.isReadBy.push(student._id);
+    if (mongoReady) {
+      await Notification.updateOne({ _id: notification._id }, { $addToSet: { isReadBy: student._id } });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to update notification' });
+  }
+  return res.json({ success: true });
+});
+
+app.post('/api/notifications/broadcast', requireAuth, requireRole('admin'), async (req, res) => {
+  const { title, message, department } = req.body || {};
+  if (!title || !message) {
+    return res.status(400).json({ success: false, message: 'Title and message are required' });
+  }
+  const notification = {
+    _id: uuidv4(),
+    title,
+    message,
+    department: department || 'ALL',
+    createdAt: nowIso(),
+    isReadBy: [],
+  };
+  try {
+    if (mongoReady) await Notification.create(notification);
+    db.notifications.unshift(notification);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to create notification' });
+  }
+  return res.json({ success: true, notification });
+});
+
+app.post('/api/notifications/new-drive/:companyId', requireAuth, requireRole('admin'), async (req, res) => {
+  const company = db.companies.find((c) => c._id === req.params.companyId);
+  if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+  const notification = {
+    _id: uuidv4(),
+    title: `${company.name} Drive Update`,
+    message: `${company.name} drive is ${company.driveStatus || 'open'}. Apply before ${company.registrationDeadline || 'N/A'}.`,
+    department: 'ALL',
+    createdAt: nowIso(),
+    isReadBy: [],
+  };
+  try {
+    if (mongoReady) await Notification.create(notification);
+    db.notifications.unshift(notification);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to create notification' });
+  }
+  return res.json({ success: true, message: 'Notified students', notification });
+});
+
+const csvEscape = (value) => {
+  const str = String(value ?? '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
+const sendCsv = (res, filename, rows) => {
+  const content = rows.map((row) => row.map(csvEscape).join(',')).join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.send(content);
+};
+
+app.get('/api/excel/template', requireAuth, requireRole('admin'), (req, res) => {
+  const rows = [
+    ['Name', 'RegisterNumber', 'Department', 'CGPA', 'Backlogs', '10th%', '12th%'],
+    ['Jane Doe', 'AI2026002', 'AI&DS', '7.5', '0', '85', '82'],
+  ];
+  return sendCsv(res, 'student_template.csv', rows);
+});
+
+app.get('/api/excel/export-students', requireAuth, requireRole('admin'), (req, res) => {
+  const rows = [
+    ['Name', 'RegisterNumber', 'Department', 'CGPA', 'Backlogs', '10th%', '12th%'],
+    ...db.students.map((s) => [
+      s.name,
+      s.registerNumber,
+      s.department,
+      s.cgpa,
+      s.backlogs,
+      s.tenthPercentage,
+      s.twelfthPercentage,
+    ]),
+  ];
+  return sendCsv(res, 'students.csv', rows);
+});
+
+app.get('/api/excel/export-eligible/:companyId', requireAuth, requireRole('admin'), (req, res) => {
+  const company = db.companies.find((c) => c._id === req.params.companyId);
+  if (!company) return res.status(404).json({ success: false, message: 'Company not found' });
+  const eligible = db.students.filter((s) => computeEligibility(s, company).isEligible);
+  const rows = [
+    ['Name', 'RegisterNumber', 'Department', 'CGPA', 'Backlogs'],
+    ...eligible.map((s) => [s.name, s.registerNumber, s.department, s.cgpa, s.backlogs]),
+  ];
+  return sendCsv(res, `eligible_${company.name}.csv`, rows);
+});
+
+app.post('/api/excel/import-students', requireAuth, requireRole('admin'), upload.single('file'), (req, res) => {
+  return res.json({ success: true, message: 'Import processed (demo)' });
+});
+
+app.use((err, req, res, next) => {
+  if (err) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ success: false, message: 'Max file size is 5 MB (PDF only)' });
+    }
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ success: false, message: err.message || 'Upload error' });
+    }
+  }
+  return next(err);
+});
+
+app.use((req, res) => res.status(404).json({ success: false, message: 'Not found' }));
+
+const initMongoAndSync = async () => {
+  if (!MONGODB_URI) return;
+  try {
+    await mongoose.connect(MONGODB_URI, { dbName: MONGODB_DB });
+    await Promise.all([
+      User.init(),
+      Student.init(),
+      Company.init(),
+      Application.init(),
+      Document.init(),
+      Notification.init(),
+    ]);
+    mongoReady = true;
+    // eslint-disable-next-line no-console
+    console.log(`MongoDB connected (db: ${mongoose.connection.name})`);
+
+    const demoEmails = [
+      'student12345@bitsathy.ac.in',
+      'student@bitsathy.ac.in',
+      'admin12345@bitsathy.ac.in',
+      'admin@bitsathy.ac.in',
+    ];
+    const demoUsers = await User.find({ email: { $in: demoEmails } }).lean();
+    if (demoUsers.length) {
+      const demoUserIds = demoUsers.map((u) => u.id);
+      await Promise.all([
+        User.deleteMany({ id: { $in: demoUserIds } }),
+        Student.deleteMany({ userId: { $in: demoUserIds } }),
+      ]);
+    }
+
+    const [userCount, studentCount, companyCount, applicationCount, documentCount, notificationCount] =
+      await Promise.all([
+        User.estimatedDocumentCount(),
+        Student.estimatedDocumentCount(),
+        Company.estimatedDocumentCount(),
+        Application.estimatedDocumentCount(),
+        Document.estimatedDocumentCount(),
+        Notification.estimatedDocumentCount(),
+      ]);
+
+    if (userCount === 0 && db.users.length) await User.insertMany(db.users);
+    if (studentCount === 0 && db.students.length) await Student.insertMany(db.students);
+    if (companyCount === 0 && db.companies.length) await Company.insertMany(db.companies);
+    if (applicationCount === 0 && db.applications.length) await Application.insertMany(db.applications);
+    if (documentCount === 0 && db.documents.length) await Document.insertMany(db.documents);
+    if (notificationCount === 0 && db.notifications.length) await Notification.insertMany(db.notifications);
+
+    const [users, students, companies, applications, documents, notifications] = await Promise.all([
+      User.find({}, { _id: 0 }).lean(),
+      Student.find({}).lean(),
+      Company.find({}).lean(),
+      Application.find({}).lean(),
+      Document.find({}).lean(),
+      Notification.find({}).sort({ createdAt: -1 }).lean(),
+    ]);
+
+    db.users = users;
+    db.students = students;
+    db.companies = companies;
+    db.applications = applications;
+    db.documents = documents;
+    db.notifications = notifications;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('MongoDB connection failed; running with in-memory DB only.', err.message || err);
+    mongoReady = false;
+  }
+};
+
+const startServer = async () => {
+  seed();
+  await initMongoAndSync();
+  app.listen(PORT, HOST, () => {
+    // eslint-disable-next-line no-console
+    console.log(`Backend running on http://localhost:${PORT} (listening on ${HOST}:${PORT})`);
+  });
+};
+
+startServer();

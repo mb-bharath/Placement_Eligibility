@@ -1,29 +1,50 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, StyleSheet, Text, ScrollView, Alert } from 'react-native';
 import { Card, Button, ActivityIndicator } from 'react-native-paper';
 import { apiFetch } from '../config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { demoCompanies, demoStudent, computeEligibility } from '../data/demoData';
+import { useFocusEffect } from '@react-navigation/native';
 
-export default function ResumeUploadScreen() {
+export default function ResumeUploadScreen({ navigation, route }) {
+  const targetCompanyId = route?.params?.companyId || null;
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [resumeCompanyIds, setResumeCompanyIds] = useState(new Set());
 
   useEffect(() => {
     loadCompanies();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadCompanies();
+    }, [])
+  );
+
   const loadCompanies = async () => {
     try {
-      const { response, data } = await apiFetch('/students/eligible-companies');
-      if (!response.ok || !data.success) {
-        throw new Error(data.message || 'Failed to load companies');
+      const [eligible, docs] = await Promise.all([
+        apiFetch('/students/eligible-companies'),
+        apiFetch('/documents/my-docs'),
+      ]);
+
+      if (!eligible.response.ok || !eligible.data.success) {
+        throw new Error(eligible.data.message || 'Failed to load companies');
       }
-      setCompanies(data.companies || []);
+      setCompanies(eligible.data.companies || []);
+
+      if (docs.response.ok && docs.data?.success) {
+        const resumeDocs = (docs.data.documents || []).filter((d) => d.documentType === 'resume');
+        setResumeCompanyIds(new Set(resumeDocs.map((d) => d.companyId).filter(Boolean)));
+      } else {
+        setResumeCompanyIds(new Set());
+      }
     } catch (err) {
       // Offline fallback: only show eligible companies
       const eligible = demoCompanies.filter((c) => computeEligibility(demoStudent, c));
       setCompanies(eligible);
+      setResumeCompanyIds(new Set());
     }
   };
 
@@ -47,6 +68,18 @@ export default function ResumeUploadScreen() {
   };
 
   const applyToCompany = async (companyId) => {
+    if (resumeCompanyIds.has(companyId)) {
+      Alert.alert(
+        'Already Uploaded',
+        'Resume already uploaded for this company. Delete the old resume to upload a new one.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Manage Resumes', onPress: () => navigation.navigate('StudentDocuments') },
+        ]
+      );
+      return;
+    }
+
     const file = await pickPdf();
     if (!file) return;
 
@@ -66,6 +99,17 @@ export default function ResumeUploadScreen() {
 
       if (!response.ok || !data.success) {
         const message = data.message || 'Application failed';
+        if (response.status === 409) {
+          Alert.alert(
+            'Resume Already Uploaded',
+            message,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Manage Resumes', onPress: () => navigation.navigate('StudentDocuments') },
+            ]
+          );
+          return;
+        }
         if (data.resumeScore !== undefined) {
           Alert.alert('Resume Too Weak', `${message}\nScore: ${data.resumeScore}/100`);
           return;
@@ -85,12 +129,19 @@ export default function ResumeUploadScreen() {
     }
   };
 
+  const visibleCompanies = useMemo(() => {
+    if (!targetCompanyId) return companies;
+    return companies.filter((c) => c && c._id === targetCompanyId);
+  }, [companies, targetCompanyId]);
+
   return (
     <ScrollView style={styles.container}>
       <Card style={styles.card}>
         <Card.Content>
           <Text style={styles.title}>Resume Upload</Text>
-          <Text style={styles.subtitle}>Upload your resume for a specific company</Text>
+          <Text style={styles.subtitle}>
+            {targetCompanyId ? 'Upload your resume for the selected company' : 'Upload your resume for a specific company'}
+          </Text>
 
           <View style={styles.ruleBox}>
             <Text style={styles.ruleTitle}>Rules</Text>
@@ -111,18 +162,26 @@ export default function ResumeUploadScreen() {
       <Card style={styles.card}>
         <Card.Content>
           <Text style={styles.sectionTitle}>Apply to Company</Text>
-          {companies.map((c) => (
+          {visibleCompanies.map((c) => (
             <View key={c._id} style={styles.companyRow}>
               <View style={styles.companyInfo}>
                 <Text style={styles.companyName}>{c.name}</Text>
-                <Text style={styles.companyMeta}>{c.package}</Text>
+                <Text style={styles.companyMeta}>
+                  {c.package} {resumeCompanyIds.has(c._id) ? '• Resume Uploaded' : ''}
+                </Text>
               </View>
-              <Button mode="contained" onPress={() => applyToCompany(c._id)}>
-                Apply
-              </Button>
+              {resumeCompanyIds.has(c._id) ? (
+                <Button mode="outlined" onPress={() => navigation.navigate('StudentDocuments')}>
+                  Manage
+                </Button>
+              ) : (
+                <Button mode="contained" onPress={() => applyToCompany(c._id)}>
+                  Upload
+                </Button>
+              )}
             </View>
           ))}
-          {companies.length === 0 && (
+          {visibleCompanies.length === 0 && (
             <Text style={styles.placeholderText}>No companies available</Text>
           )}
         </Card.Content>

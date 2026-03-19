@@ -5,10 +5,9 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Dimensions,
 } from 'react-native';
-import { Card, Button, Avatar } from 'react-native-paper';
+import { Card, Button, Avatar, IconButton, useTheme } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BarChart } from 'react-native-chart-kit';
 import { apiFetch } from '../config/api';
@@ -17,6 +16,8 @@ import { demoAdminStats, demoAppStats, demoChart } from '../data/demoData';
 const screenWidth = Dimensions.get('window').width;
 
 export default function AdminDashboardScreen({ navigation }) {
+  const theme = useTheme();
+  const [admin, setAdmin] = useState({ name: 'Admin' });
   const [stats, setStats] = useState({
     totalCompanies: 0,
     totalStudents: 0,
@@ -33,6 +34,15 @@ export default function AdminDashboardScreen({ navigation }) {
 
   useEffect(() => {
     calculateStats();
+  }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      const userData = await AsyncStorage.getItem('user');
+      const u = userData ? JSON.parse(userData) : {};
+      setAdmin({ name: u.name || 'Admin' });
+    };
+    load();
   }, []);
 
   const calculateStats = () => {
@@ -89,26 +99,6 @@ export default function AdminDashboardScreen({ navigation }) {
     load();
   };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          onPress: async () => {
-            await AsyncStorage.multiRemove(['user', 'token']);
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'RoleSelect' }],
-            });
-          },
-        },
-      ]
-    );
-  };
-
   const chartData = {
     labels: chart.labels.length > 0 ? chart.labels : ['No Data'],
     datasets: [
@@ -120,14 +110,31 @@ export default function AdminDashboardScreen({ navigation }) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.containerContent}>
-      <View style={styles.header}>
-        <Avatar.Icon 
-          size={80} 
-          icon="shield-account" 
-          style={styles.avatar}
-        />
-        <Text style={styles.welcomeText}>Admin Dashboard</Text>
-        <Text style={styles.subText}>Placement Management System</Text>
+      <View style={[styles.header, { backgroundColor: theme.colors.primary }]}>
+        <View style={styles.headerTopRow}>
+          <Text style={[styles.headerTopTitle, { color: theme.colors.onPrimary }]}>
+            Admin Dashboard
+          </Text>
+          <IconButton
+            icon="bell-outline"
+            iconColor={theme.colors.onPrimary}
+            size={22}
+            style={styles.headerBell}
+            onPress={() => navigation.navigate('AdminNotifications')}
+          />
+        </View>
+
+        <View style={styles.headerCenter}>
+          <View style={styles.headerAvatarCircle}>
+            <Avatar.Icon size={58} icon="shield-account" style={styles.headerAvatarIcon} color="#6A00FF" />
+          </View>
+          <Text style={[styles.welcomeText, { color: theme.colors.onPrimary }]}>
+            Hi {String(admin.name || 'Admin').toUpperCase()},
+          </Text>
+          <Text style={[styles.subText, { color: theme.colors.onPrimary }]}>
+            Here's your dashboard overview
+          </Text>
+        </View>
       </View>
 
       <View style={styles.statsContainer}>
@@ -260,7 +267,7 @@ export default function AdminDashboardScreen({ navigation }) {
       <View style={styles.menuContainer}>
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('CompanyManagement')}
+          onPress={() => navigation.navigate('AdminDriveTab', { screen: 'CompanyManagement' })}
         >
           <Card style={styles.menuCard}>
             <Card.Content style={styles.menuContent}>
@@ -276,7 +283,7 @@ export default function AdminDashboardScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('StudentManagement')}
+          onPress={() => navigation.navigate('AdminStudentsTab', { screen: 'StudentManagement' })}
         >
           <Card style={styles.menuCard}>
             <Card.Content style={styles.menuContent}>
@@ -292,7 +299,7 @@ export default function AdminDashboardScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('EligibleStudents')}
+          onPress={() => navigation.navigate('AdminStudentsTab', { screen: 'EligibleStudents' })}
         >
           <Card style={styles.menuCard}>
             <Card.Content style={styles.menuContent}>
@@ -308,7 +315,7 @@ export default function AdminDashboardScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('PlacementStats')}
+          onPress={() => navigation.navigate('AdminReportsTab', { screen: 'PlacementStats' })}
         >
           <Card style={styles.menuCard}>
             <Card.Content style={styles.menuContent}>
@@ -340,7 +347,7 @@ export default function AdminDashboardScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('DriveControl')}
+          onPress={() => navigation.navigate('AdminDriveTab', { screen: 'DriveControl' })}
         >
           <Card style={styles.menuCard}>
             <Card.Content style={styles.menuContent}>
@@ -356,23 +363,7 @@ export default function AdminDashboardScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate('Excel')}
-        >
-          <Card style={styles.menuCard}>
-            <Card.Content style={styles.menuContent}>
-              <Avatar.Icon 
-                size={50} 
-                icon="google-spreadsheet" 
-                style={styles.menuIcon}
-              />
-              <Text style={styles.menuText}>Google Sheet Import</Text>
-            </Card.Content>
-          </Card>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => navigation.navigate('Excel')}
+          onPress={() => navigation.navigate('AdminReportsTab', { screen: 'Excel' })}
         >
           <Card style={styles.menuCard}>
             <Card.Content style={styles.menuContent}>
@@ -386,15 +377,6 @@ export default function AdminDashboardScreen({ navigation }) {
           </Card>
         </TouchableOpacity>
       </View>
-
-      <Button
-        mode="outlined"
-        onPress={handleLogout}
-        style={styles.logoutButton}
-        icon="logout"
-      >
-        Logout
-      </Button>
     </ScrollView>
   );
 }
@@ -408,32 +390,59 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
   },
   header: {
-    backgroundColor: '#6200ee',
-    padding: 30,
-    alignItems: 'center',
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
+    paddingTop: 24,
+    paddingHorizontal: 18,
+    paddingBottom: 60,
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
   },
-  avatar: {
-    backgroundColor: '#fff',
-    marginBottom: 15,
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerTopTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  headerCenter: {
+    alignItems: 'center',
+    marginTop: 18,
+  },
+  headerAvatarCircle: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    elevation: 3,
+  },
+  headerAvatarIcon: {
+    backgroundColor: 'transparent',
   },
   welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
+    fontSize: 26,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
   },
   subText: {
     fontSize: 14,
-    color: '#e0e0e0',
+    opacity: 0.92,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  headerBell: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   statsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-around',
     padding: 20,
-    marginTop: -40,
+    marginTop: -55,
   },
   statCard: {
     width: '30%',
@@ -497,10 +506,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-  },
-  logoutButton: {
-    margin: 20,
-    borderColor: '#c62828',
-    borderRadius: 10,
   },
 });

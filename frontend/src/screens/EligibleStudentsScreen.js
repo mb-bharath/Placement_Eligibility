@@ -4,7 +4,7 @@ import { Card, Button, Chip, ActivityIndicator } from 'react-native-paper';
 import { apiFetch } from '../config/api';
 import { demoCompanies, eligibleStudentsForCompany } from '../data/demoData';
 
-export default function EligibleStudentsScreen() {
+export default function EligibleStudentsScreen({ navigation }) {
   const [companies, setCompanies] = useState([]);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [students, setStudents] = useState([]);
@@ -89,7 +89,12 @@ export default function EligibleStudentsScreen() {
                   {s.registerNumber} • {s.department} • CGPA {s.cgpa}
                 </Text>
               </View>
-              <Button mode="text">View</Button>
+              <Button
+                mode="text"
+                onPress={() => navigation.navigate('AdminStudentDetails', { studentId: s._id })}
+              >
+                View
+              </Button>
             </View>
           ))}
         </Card.Content>

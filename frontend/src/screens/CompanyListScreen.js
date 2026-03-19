@@ -11,7 +11,7 @@ import { apiFetch } from '../config/api';
 import { useFocusEffect } from '@react-navigation/native';
 import { demoCompanies } from '../data/demoData';
 
-export default function CompanyListScreen() {
+export default function CompanyListScreen({ navigation }) {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -46,6 +46,9 @@ export default function CompanyListScreen() {
         <Text style={styles.headerText}>
           {companies.length} Companies Hiring
         </Text>
+        <Text style={styles.headerSubText}>
+          Tap any company card to view requirements & drive details
+        </Text>
       </View>
 
       {loading && (
@@ -56,7 +59,13 @@ export default function CompanyListScreen() {
       )}
 
       {companies.map((company) => (
-        <Card key={company._id || company.id} style={styles.card}>
+        <Card
+          key={company._id || company.id}
+          style={styles.card}
+          onPress={() =>
+            navigation.navigate('CompanyDetails', { companyId: company._id, company })
+          }
+        >
           <Card.Content>
             <View style={styles.cardHeader}>
               <Text style={styles.companyName}>{company.name}</Text>
@@ -87,6 +96,7 @@ export default function CompanyListScreen() {
             </View>
 
             <Text style={styles.description}>{company.description}</Text>
+            <Text style={styles.tapHint}>Tap to view</Text>
           </Card.Content>
         </Card>
       ))}
@@ -108,6 +118,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+    textAlign: 'center',
+  },
+  headerSubText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#e6ddff',
     textAlign: 'center',
   },
   loadingBox: {
@@ -181,5 +197,12 @@ const styles = StyleSheet.create({
     color: '#666',
     fontStyle: 'italic',
     marginTop: 5,
+  },
+  tapHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#6200ee',
+    fontWeight: '600',
+    textAlign: 'right',
   },
 });

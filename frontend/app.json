@@ -21,6 +21,9 @@
       "permissions": [
         "INTERNET"
       ]
-    }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker"
+    ]
   }
 }

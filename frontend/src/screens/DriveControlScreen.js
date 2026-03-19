@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, ScrollView, Alert } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, StyleSheet, Text, ScrollView, Alert, Platform, Pressable } from 'react-native';
 import { Card, TextInput, Button, Chip } from 'react-native-paper';
 import { apiFetch, apiJson } from '../config/api';
 import { demoCompanies } from '../data/demoData';
 
-export default function DriveControlScreen() {
+export default function DriveControlScreen({ navigation }) {
   const [companies, setCompanies] = useState([]);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [form, setForm] = useState({
@@ -61,13 +61,62 @@ export default function DriveControlScreen() {
       if (!response.ok || !data.success) {
         throw new Error(data.message || 'Failed to update drive');
       }
-      Alert.alert('Success', 'Drive details updated');
+      Alert.alert('Success', 'Drive details updated', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
     } catch (err) {
-      Alert.alert('Saved Locally', 'Drive details saved locally (demo mode).');
+      Alert.alert('Saved Locally', 'Drive details saved locally (demo mode).', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
     } finally {
       setLoading(false);
     }
   };
+
+  const DateTimePicker = useMemo(() => {
+    try {
+      // eslint-disable-next-line global-require
+      return require('@react-native-community/datetimepicker');
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  const DateTimePickerComp = DateTimePicker ? DateTimePicker.default || DateTimePicker : null;
+  const DateTimePickerAndroid = DateTimePicker ? DateTimePicker.DateTimePickerAndroid || DateTimePicker.DateTimePickerAndroid : null;
+
+  const openDatePicker = (field) => {
+    if (!DateTimePicker) {
+      Alert.alert(
+        'Missing Dependency',
+        'Install @react-native-community/datetimepicker to use calendar picker.'
+      );
+      return;
+    }
+
+    const currentValue = form[field] ? new Date(form[field]) : new Date();
+    const onChange = (event, selectedDate) => {
+      if (!selectedDate) return;
+      const yyyy = selectedDate.getFullYear();
+      const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(selectedDate.getDate()).padStart(2, '0');
+      setForm((prev) => ({ ...prev, [field]: `${yyyy}-${mm}-${dd}` }));
+    };
+
+    if (Platform.OS === 'android' && DateTimePickerAndroid) {
+      DateTimePickerAndroid.open({
+        value: currentValue,
+        mode: 'date',
+        is24Hour: true,
+        onChange,
+      });
+      return;
+    }
+
+    setIosPicker({ open: true, field, value: currentValue });
+  };
+
+  const [iosPicker, setIosPicker] = useState({ open: false, field: null, value: new Date() });
 
   return (
     <ScrollView style={styles.container}>
@@ -108,20 +157,26 @@ export default function DriveControlScreen() {
             onChangeText={(text) => setForm({ ...form, location: text })}
             style={styles.input}
           />
-          <TextInput
-            label="Drive Date (YYYY-MM-DD)"
-            mode="outlined"
-            value={form.driveDate}
-            onChangeText={(text) => setForm({ ...form, driveDate: text })}
-            style={styles.input}
-          />
-          <TextInput
-            label="Registration Deadline (YYYY-MM-DD)"
-            mode="outlined"
-            value={form.registrationDeadline}
-            onChangeText={(text) => setForm({ ...form, registrationDeadline: text })}
-            style={styles.input}
-          />
+          <Pressable onPress={() => openDatePicker('driveDate')}>
+            <View pointerEvents="none">
+              <TextInput
+                label="Drive Date"
+                mode="outlined"
+                value={form.driveDate}
+                style={styles.input}
+              />
+            </View>
+          </Pressable>
+          <Pressable onPress={() => openDatePicker('registrationDeadline')}>
+            <View pointerEvents="none">
+              <TextInput
+                label="Registration Deadline"
+                mode="outlined"
+                value={form.registrationDeadline}
+                style={styles.input}
+              />
+            </View>
+          </Pressable>
           <TextInput
             label="Drive Status (upcoming/open/closed/completed)"
             mode="outlined"
@@ -129,6 +184,26 @@ export default function DriveControlScreen() {
             onChangeText={(text) => setForm({ ...form, driveStatus: text })}
             style={styles.input}
           />
+
+          {iosPicker.open && DateTimePickerComp && (
+            <View style={styles.iosPickerBox}>
+              <DateTimePickerComp
+                value={iosPicker.value}
+                mode="date"
+                display="spinner"
+                onChange={(event, selectedDate) => {
+                  if (!selectedDate) return;
+                  const yyyy = selectedDate.getFullYear();
+                  const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                  const dd = String(selectedDate.getDate()).padStart(2, '0');
+                  setForm((prev) => ({ ...prev, [iosPicker.field]: `${yyyy}-${mm}-${dd}` }));
+                }}
+              />
+              <Button mode="contained" onPress={() => setIosPicker({ open: false, field: null, value: new Date() })}>
+                Done
+              </Button>
+            </View>
+          )}
 
           <Button mode="contained" onPress={saveDrive} loading={loading} style={styles.button}>
             Save Changes
@@ -177,5 +252,8 @@ const styles = StyleSheet.create({
   },
   button: {
     borderRadius: 10,
+  },
+  iosPickerBox: {
+    marginBottom: 12,
   },
 });
