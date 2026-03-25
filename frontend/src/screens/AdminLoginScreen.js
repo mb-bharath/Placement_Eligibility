@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { TextInput, Button } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { buildApiUrl } from '../config/api';
+import { buildApiUrl, fetchWithTimeout } from '../config/api';
 
 const DEMO_EMAIL = 'admin12345@bitsathy.ac.in';
 const DEMO_PASSWORD = 'admin12345';
@@ -31,16 +31,11 @@ export default function AdminLoginScreen({ navigation }) {
     const isDemo = email === DEMO_EMAIL && password === DEMO_PASSWORD;
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-      const response = await fetch(buildApiUrl('/auth/login'), {
+      const response = await fetchWithTimeout(buildApiUrl('/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+      }, 20000);
 
       const data = await response.json();
       if (!response.ok || !data.success) {

@@ -5,11 +5,44 @@ import {
   Text,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
-import { TextInput, Button, Dialog, Portal, useTheme } from 'react-native-paper';
+import { TextInput, Button, Dialog, Portal, useTheme, RadioButton } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiFetch, apiJson } from '../config/api';
 import { demoStudent } from '../data/demoData';
+
+const DEGREE_OPTIONS = [
+  { value: 'BE', label: 'B.E' },
+  { value: 'BTECH', label: 'B.Tech' },
+];
+
+const DEPARTMENTS_BY_DEGREE = {
+  BE: [
+    'Biomedical Engineering',
+    'Civil Engineering',
+    'Computer Science & Design',
+    'Computer Science & Engineering',
+    'Electrical & Electronics Engineering',
+    'Electronics & Communication Engineering',
+    'Electronics & Instrumentation Engineering',
+    'Information Science & Engineering',
+    'Mechanical Engineering',
+    'Mechatronics Engineering',
+  ],
+  BTECH: [
+    'Agricultural Engineering',
+    'Artificial Intelligence and Data Science',
+    'Artificial Intelligence and Machine Learning',
+    'Biotechnology',
+    'Computer Science & Business Systems',
+    'Computer Technology',
+    'Food Technology',
+    'Fashion Technology',
+    'Information Technology',
+    'Textile Technology',
+  ],
+};
 
 export default function StudentProfileScreen({ navigation }) {
   const theme = useTheme();
@@ -18,6 +51,7 @@ export default function StudentProfileScreen({ navigation }) {
     name: '',
     registerNumber: '',
     phone: '',
+    degree: '',
     department: '',
     batch: '',
     cgpa: '',
@@ -27,6 +61,8 @@ export default function StudentProfileScreen({ navigation }) {
     twelfthPercentage: '',
   });
   const [loading, setLoading] = useState(false);
+  const [deptOther, setDeptOther] = useState('');
+  const [firstVisit, setFirstVisit] = useState(false);
 
   useEffect(() => {
     loadUserData();
@@ -40,10 +76,13 @@ export default function StudentProfileScreen({ navigation }) {
       }
 
       const student = data.student || {};
+      const profileComplete = !!student.profileComplete;
+      setFirstVisit(!profileComplete);
       setUser({
         name: student.name || '',
         registerNumber: student.registerNumber || '',
         phone: student.phone || '',
+        degree: student.degree || '',
         department: student.department || '',
         batch: student.batch || '',
         cgpa: student.cgpa !== null && student.cgpa !== undefined ? String(student.cgpa) : '',
@@ -58,6 +97,7 @@ export default function StudentProfileScreen({ navigation }) {
         name: demoStudent.name,
         registerNumber: demoStudent.registerNumber,
         phone: '',
+        degree: '',
         department: demoStudent.department,
         batch: '',
         cgpa: String(demoStudent.cgpa),
@@ -70,8 +110,23 @@ export default function StudentProfileScreen({ navigation }) {
   };
 
   const handleSave = async () => {
-    if (!user.name || !user.registerNumber || !user.department) {
-      Alert.alert('Error', 'Please fill all required fields');
+    const requiredFields = [
+      { key: 'name', label: 'Name' },
+      { key: 'registerNumber', label: 'Register Number' },
+      { key: 'phone', label: 'Phone' },
+      { key: 'degree', label: 'Degree' },
+      { key: 'department', label: 'Department' },
+      { key: 'batch', label: 'Batch' },
+      { key: 'cgpa', label: 'CGPA' },
+      { key: 'backlogs', label: 'Backlogs' },
+      { key: 'historyOfArrears', label: 'History of Arrears' },
+      { key: 'tenthPercentage', label: '10th Percentage' },
+      { key: 'twelfthPercentage', label: '12th Percentage' },
+    ];
+
+    const missing = requiredFields.filter(({ key }) => !String(user[key] || '').trim());
+    if (missing.length > 0) {
+      Alert.alert('Error', `Please fill: ${missing.map((m) => m.label).join(', ')}`);
       return;
     }
 
@@ -108,6 +163,7 @@ export default function StudentProfileScreen({ navigation }) {
         name: user.name,
         registerNumber: user.registerNumber,
         phone: user.phone,
+        degree: user.degree,
         department: user.department,
         batch: user.batch,
         cgpa,
@@ -126,14 +182,13 @@ export default function StudentProfileScreen({ navigation }) {
 
       const userData = await AsyncStorage.getItem('user');
       const currentUser = userData ? JSON.parse(userData) : {};
-      await AsyncStorage.setItem('user', JSON.stringify({ ...currentUser, ...data.student }));
+      await AsyncStorage.setItem('user', JSON.stringify({ ...currentUser, ...data.student, profileComplete: true }));
 
-      Alert.alert('Success', 'Profile updated successfully', [
-        {
-          text: 'OK',
-          onPress: () => navigation.goBack(),
-        },
-      ]);
+      const onContinue = firstVisit
+        ? () => navigation.replace('StudentApp')
+        : () => navigation.goBack();
+
+      onContinue();
     } catch (error) {
       console.error('Error saving profile:', error);
       Alert.alert('Error', 'Failed to save profile');
@@ -170,6 +225,9 @@ export default function StudentProfileScreen({ navigation }) {
 
       <View style={[styles.card, { backgroundColor: theme.colors.surface }]}>
         <Text style={[styles.title, { color: theme.colors.primary }]}>Student Profile</Text>
+        <Text style={[styles.note, { color: theme.colors.onSurfaceVariant }]}>
+          All fields are required. Complete this once to access the dashboard.
+        </Text>
 
         <TextInput
           label="Name *"
@@ -190,7 +248,7 @@ export default function StudentProfileScreen({ navigation }) {
         />
 
         <TextInput
-          label="Phone"
+          label="Phone *"
           value={user.phone}
           onChangeText={(text) => setUser({ ...user, phone: text })}
           mode="outlined"
@@ -199,18 +257,74 @@ export default function StudentProfileScreen({ navigation }) {
           left={<TextInput.Icon icon="phone" />}
         />
 
+        <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>Degree *</Text>
+        <RadioButton.Group
+          onValueChange={(value) => {
+            const firstDept = (DEPARTMENTS_BY_DEGREE[value] || [])[0] || '';
+            setUser((prev) => ({
+              ...prev,
+              degree: value,
+              department: firstDept,
+            }));
+            setDeptOther('');
+          }}
+          value={user.degree}
+        >
+          <View style={styles.degreeRow}>
+            {DEGREE_OPTIONS.map((opt) => (
+              <View key={opt.value} style={styles.degreeOption}>
+                <RadioButton value={opt.value} />
+                <Text style={{ color: theme.colors.onSurface }}>{opt.label}</Text>
+              </View>
+            ))}
+          </View>
+        </RadioButton.Group>
+
+        <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>Department *</Text>
         <TextInput
-          label="Department *"
-          value={user.department}
-          onChangeText={(text) => setUser({ ...user, department: text })}
+          mode="outlined"
+          value={
+            DEPARTMENTS_BY_DEGREE[user.degree]?.includes(user.department)
+              ? user.department
+              : deptOther
+          }
+          onFocus={() => {}}
+          style={styles.input}
+          placeholder="Select from below"
+          left={<TextInput.Icon icon="school" />}
+          editable={false}
+        />
+        <View style={styles.deptList}>
+          {(DEPARTMENTS_BY_DEGREE[user.degree] || []).map((dept) => (
+            <Button
+              key={dept}
+              mode={user.department === dept ? 'contained' : 'outlined'}
+              style={styles.deptChip}
+              onPress={() => {
+                setUser((prev) => ({ ...prev, department: dept }));
+                setDeptOther('');
+              }}
+              compact
+            >
+              {dept}
+            </Button>
+          ))}
+        </View>
+        <TextInput
+          label="Other Department"
+          value={deptOther}
+          onChangeText={(text) => {
+            setDeptOther(text);
+            setUser((prev) => ({ ...prev, department: text }));
+          }}
           mode="outlined"
           style={styles.input}
-          left={<TextInput.Icon icon="school" />}
-          placeholder="e.g., CSE, AI&DS, IT"
+          left={<TextInput.Icon icon="plus" />}
+          placeholder="If not listed above"
         />
 
         <TextInput
-          label="Batch"
+          label="Batch *"
           value={user.batch}
           onChangeText={(text) => setUser({ ...user, batch: text })}
           mode="outlined"
@@ -298,7 +412,7 @@ export default function StudentProfileScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+  const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
@@ -314,8 +428,38 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
   },
+  note: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
   input: {
     marginBottom: 15,
+  },
+  sectionLabel: {
+    fontSize: 14,
+    marginBottom: 6,
+    marginTop: 6,
+    fontWeight: '600',
+  },
+  degreeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    marginBottom: 10,
+  },
+  degreeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deptList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  deptChip: {
+    marginRight: 6,
+    marginBottom: 6,
+    borderRadius: 8,
   },
   button: {
     marginTop: 20,

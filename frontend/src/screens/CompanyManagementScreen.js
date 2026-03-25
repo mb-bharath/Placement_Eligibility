@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   StyleSheet,
   Text,
   ScrollView,
   Alert,
+  Platform,
+  Pressable,
 } from 'react-native';
 import { Card, Button, TextInput, Chip, IconButton, ActivityIndicator } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,6 +16,7 @@ export default function CompanyManagementScreen() {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [iosPicker, setIosPicker] = useState({ open: false, field: null, value: new Date() });
   const [newCompany, setNewCompany] = useState({
     name: '',
     minCGPA: '',
@@ -28,6 +31,55 @@ export default function CompanyManagementScreen() {
     tenthPercentageMin: '',
     twelfthPercentageMin: '',
   });
+
+  const DateTimePicker = useMemo(() => {
+    try {
+      // eslint-disable-next-line global-require
+      return require('@react-native-community/datetimepicker');
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  const DateTimePickerComp = DateTimePicker ? DateTimePicker.default || DateTimePicker : null;
+  const DateTimePickerAndroid = DateTimePicker
+    ? DateTimePicker.DateTimePickerAndroid || DateTimePicker.DateTimePickerAndroid
+    : null;
+
+  const fmtYmd = (date) => {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const openDatePicker = (field) => {
+    if (!DateTimePicker) {
+      Alert.alert(
+        'Missing Dependency',
+        'Install @react-native-community/datetimepicker to use calendar picker.'
+      );
+      return;
+    }
+
+    const currentValue = newCompany[field] ? new Date(newCompany[field]) : new Date();
+    const onChange = (event, selectedDate) => {
+      if (!selectedDate) return;
+      setNewCompany((prev) => ({ ...prev, [field]: fmtYmd(selectedDate) }));
+    };
+
+    if (Platform.OS === 'android' && DateTimePickerAndroid) {
+      DateTimePickerAndroid.open({
+        value: currentValue,
+        mode: 'date',
+        is24Hour: true,
+        onChange,
+      });
+      return;
+    }
+
+    setIosPicker({ open: true, field, value: currentValue });
+  };
 
   const fetchCompanies = async () => {
     setLoading(true);
@@ -61,26 +113,73 @@ export default function CompanyManagementScreen() {
   }, []);
 
   const handleAddCompany = () => {
-    if (!newCompany.name || !newCompany.minCGPA || !newCompany.maxBacklogs || !newCompany.package) {
-      Alert.alert('Error', 'Please fill all required fields');
+    const missing = [];
+    if (!String(newCompany.name || '').trim()) missing.push('Company Name');
+    if (!String(newCompany.minCGPA || '').trim()) missing.push('Minimum CGPA');
+    if (!String(newCompany.maxBacklogs || '').trim()) missing.push('Maximum Backlogs');
+    if (!String(newCompany.package || '').trim()) missing.push('Package');
+    if (!String(newCompany.description || '').trim()) missing.push('Description');
+    if (!String(newCompany.jobRole || '').trim()) missing.push('Job Role');
+    if (!String(newCompany.location || '').trim()) missing.push('Location');
+    if (!String(newCompany.driveDate || '').trim()) missing.push('Drive Date');
+    if (!String(newCompany.registrationDeadline || '').trim()) missing.push('Registration Deadline');
+    if (!String(newCompany.tenthPercentageMin || '').trim()) missing.push('10th % Minimum');
+    if (!String(newCompany.twelfthPercentageMin || '').trim()) missing.push('12th % Minimum');
+    if (!Array.isArray(newCompany.eligibleDepartments) || newCompany.eligibleDepartments.length === 0) {
+      missing.push('Eligible Departments');
+    }
+
+    if (missing.length) {
+      Alert.alert('Missing Fields', `Please fill all fields:\n\n- ${missing.join('\n- ')}`);
+      return;
+    }
+
+    const parsedMinCgpa = parseFloat(newCompany.minCGPA);
+    const parsedMaxBacklogs = parseInt(newCompany.maxBacklogs, 10);
+    const parsedTenth = parseFloat(newCompany.tenthPercentageMin);
+    const parsedTwelfth = parseFloat(newCompany.twelfthPercentageMin);
+
+    if (Number.isNaN(parsedMinCgpa) || parsedMinCgpa < 0 || parsedMinCgpa > 10) {
+      Alert.alert('Error', 'Minimum CGPA must be a number between 0 and 10');
+      return;
+    }
+    if (Number.isNaN(parsedMaxBacklogs) || parsedMaxBacklogs < 0) {
+      Alert.alert('Error', 'Maximum Backlogs must be a number 0 or greater');
+      return;
+    }
+    if (Number.isNaN(parsedTenth) || parsedTenth < 0 || parsedTenth > 100) {
+      Alert.alert('Error', '10th % Minimum must be a number between 0 and 100');
+      return;
+    }
+    if (Number.isNaN(parsedTwelfth) || parsedTwelfth < 0 || parsedTwelfth > 100) {
+      Alert.alert('Error', '12th % Minimum must be a number between 0 and 100');
+      return;
+    }
+
+    const driveDate = new Date(newCompany.driveDate);
+    const registrationDeadline = new Date(newCompany.registrationDeadline);
+    if (Number.isNaN(driveDate.getTime())) {
+      Alert.alert('Error', 'Drive Date must be a valid date (YYYY-MM-DD)');
+      return;
+    }
+    if (Number.isNaN(registrationDeadline.getTime())) {
+      Alert.alert('Error', 'Registration Deadline must be a valid date (YYYY-MM-DD)');
       return;
     }
 
     const payload = {
       name: newCompany.name.trim(),
-      minCGPA: parseFloat(newCompany.minCGPA),
-      maxBacklogs: parseInt(newCompany.maxBacklogs, 10),
+      minCGPA: parsedMinCgpa,
+      maxBacklogs: parsedMaxBacklogs,
       package: newCompany.package.trim(),
-      eligibleDepartments: newCompany.eligibleDepartments.length > 0
-        ? newCompany.eligibleDepartments
-        : ['CSE', 'ECE', 'MECH', 'EEE', 'IT', 'AI&DS'],
-      description: newCompany.description || 'No description available',
-      jobRole: newCompany.jobRole || '',
-      location: newCompany.location || '',
-      driveDate: newCompany.driveDate ? new Date(newCompany.driveDate) : null,
-      registrationDeadline: newCompany.registrationDeadline ? new Date(newCompany.registrationDeadline) : null,
-      tenthPercentageMin: newCompany.tenthPercentageMin ? parseFloat(newCompany.tenthPercentageMin) : null,
-      twelfthPercentageMin: newCompany.twelfthPercentageMin ? parseFloat(newCompany.twelfthPercentageMin) : null,
+      eligibleDepartments: newCompany.eligibleDepartments,
+      description: newCompany.description.trim(),
+      jobRole: newCompany.jobRole.trim(),
+      location: newCompany.location.trim(),
+      driveDate,
+      registrationDeadline,
+      tenthPercentageMin: parsedTenth,
+      twelfthPercentageMin: parsedTwelfth,
     };
 
     const submit = async () => {
@@ -246,7 +345,7 @@ export default function CompanyManagementScreen() {
             />
 
             <TextInput
-              label="Description"
+              label="Description *"
               value={newCompany.description}
               onChangeText={(text) => setNewCompany({ ...newCompany, description: text })}
               mode="outlined"
@@ -256,7 +355,7 @@ export default function CompanyManagementScreen() {
             />
 
             <TextInput
-              label="Job Role"
+              label="Job Role *"
               value={newCompany.jobRole}
               onChangeText={(text) => setNewCompany({ ...newCompany, jobRole: text })}
               mode="outlined"
@@ -264,31 +363,58 @@ export default function CompanyManagementScreen() {
             />
 
             <TextInput
-              label="Location"
+              label="Location *"
               value={newCompany.location}
               onChangeText={(text) => setNewCompany({ ...newCompany, location: text })}
               mode="outlined"
               style={styles.input}
             />
 
-            <TextInput
-              label="Drive Date (YYYY-MM-DD)"
-              value={newCompany.driveDate}
-              onChangeText={(text) => setNewCompany({ ...newCompany, driveDate: text })}
-              mode="outlined"
-              style={styles.input}
-            />
+            <Pressable onPress={() => openDatePicker('driveDate')}>
+              <View pointerEvents="none">
+                <TextInput
+                  label="Drive Date *"
+                  value={newCompany.driveDate}
+                  mode="outlined"
+                  style={styles.input}
+                />
+              </View>
+            </Pressable>
+
+            <Pressable onPress={() => openDatePicker('registrationDeadline')}>
+              <View pointerEvents="none">
+                <TextInput
+                  label="Registration Deadline *"
+                  value={newCompany.registrationDeadline}
+                  mode="outlined"
+                  style={styles.input}
+                />
+              </View>
+            </Pressable>
+
+            {iosPicker.open && DateTimePickerComp && (
+              <View style={styles.iosPickerBox}>
+                <DateTimePickerComp
+                  value={iosPicker.value}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, selectedDate) => {
+                    if (!selectedDate) return;
+                    setNewCompany((prev) => ({ ...prev, [iosPicker.field]: fmtYmd(selectedDate) }));
+                  }}
+                />
+                <Button
+                  mode="contained"
+                  onPress={() => setIosPicker({ open: false, field: null, value: new Date() })}
+                  style={styles.iosPickerDone}
+                >
+                  Done
+                </Button>
+              </View>
+            )}
 
             <TextInput
-              label="Registration Deadline (YYYY-MM-DD)"
-              value={newCompany.registrationDeadline}
-              onChangeText={(text) => setNewCompany({ ...newCompany, registrationDeadline: text })}
-              mode="outlined"
-              style={styles.input}
-            />
-
-            <TextInput
-              label="10th % Minimum"
+              label="10th % Minimum *"
               value={newCompany.tenthPercentageMin}
               onChangeText={(text) => setNewCompany({ ...newCompany, tenthPercentageMin: text })}
               mode="outlined"
@@ -297,7 +423,7 @@ export default function CompanyManagementScreen() {
             />
 
             <TextInput
-              label="12th % Minimum"
+              label="12th % Minimum *"
               value={newCompany.twelfthPercentageMin}
               onChangeText={(text) => setNewCompany({ ...newCompany, twelfthPercentageMin: text })}
               mode="outlined"
@@ -305,7 +431,7 @@ export default function CompanyManagementScreen() {
               style={styles.input}
             />
 
-            <Text style={styles.label}>Eligible Departments:</Text>
+            <Text style={styles.label}>Eligible Departments: *</Text>
             <View style={styles.departmentContainer}>
               {departments.map((dept) => (
                 <Chip
@@ -438,6 +564,13 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: 10,
+    borderRadius: 10,
+  },
+  iosPickerBox: {
+    marginBottom: 12,
+  },
+  iosPickerDone: {
+    marginTop: 8,
     borderRadius: 10,
   },
   companyCard: {

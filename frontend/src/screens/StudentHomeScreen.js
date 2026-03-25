@@ -4,7 +4,7 @@ import {
   StyleSheet,
   Text,
   ScrollView,
-  TouchableOpacity,
+  Pressable,
   Linking,
 } from 'react-native';
 import { Card, Button, Avatar, IconButton, useTheme } from 'react-native-paper';
@@ -48,7 +48,16 @@ export default function StudentHomeScreen({ navigation }) {
 
   const loadUserData = async () => {
     try {
-      const userData = await AsyncStorage.getItem('user');
+      const [userData, token] = await Promise.all([
+        AsyncStorage.getItem('user'),
+        AsyncStorage.getItem('token'),
+      ]);
+
+      if (!token) {
+        navigation.replace('Login');
+        return;
+      }
+
       if (userData) setUser(JSON.parse(userData));
 
       const [dash, docs, eligible] = await Promise.all([
@@ -56,6 +65,16 @@ export default function StudentHomeScreen({ navigation }) {
         apiFetch('/documents/my-docs'),
         apiFetch('/students/eligible-companies'),
       ]);
+
+      const isUnauthorized =
+        dash.response.status === 401 ||
+        docs.response.status === 401 ||
+        eligible.response.status === 401 ||
+        dash.data?.message === 'Invalid token';
+
+      if (isUnauthorized) {
+        throw new Error('unauthorized');
+      }
 
       if (!dash.response.ok || !dash.data.success) {
         throw new Error(dash.data.message || 'Failed to load dashboard');
@@ -86,6 +105,13 @@ export default function StudentHomeScreen({ navigation }) {
       }
     } catch (error) {
       console.error('Error loading user data:', error);
+
+      if (String(error?.message).toLowerCase().includes('unauthorized')) {
+        await AsyncStorage.multiRemove(['token', 'user']);
+        navigation.replace('Login');
+        return;
+      }
+
       // Offline fallback demo data
       setStats({
         total: demoDashboardCounts.total,
@@ -316,69 +342,69 @@ export default function StudentHomeScreen({ navigation }) {
       </Card>
 
       <View style={styles.menuContainer}>
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('ProfileTab', { screen: 'StudentProfile' })}
         >
           <Avatar.Icon size={50} icon="account" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>My Profile</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('CompaniesTab', { screen: 'CompanyList' })}
         >
           <Avatar.Icon size={50} icon="office-building" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Companies</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('CompaniesTab', { screen: 'EligibilityResult' })}
         >
           <Avatar.Icon size={50} icon="clipboard-check" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Check Eligibility</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('CompaniesTab', { screen: 'EligibilityStatus' })}
         >
           <Avatar.Icon size={50} icon="shield-check" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Eligibility Status</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('ResumeTab', { screen: 'ResumeUpload' })}
         >
           <Avatar.Icon size={50} icon="file-upload" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Resume Upload</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('ResumeTab', { screen: 'ResumeStrength' })}
         >
           <Avatar.Icon size={50} icon="file-chart" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Resume Strength</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('ProfileTab', { screen: 'AcademicData' })}
         >
           <Avatar.Icon size={50} icon="school" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Academic Data</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        <TouchableOpacity
+        <Pressable
           style={styles.menuItem}
           onPress={() => navigation.navigate('StudentNotifications')}
         >
           <Avatar.Icon size={50} icon="bell" style={[styles.menuIcon, { backgroundColor: theme.colors.primary }]} />
           <Text style={[styles.menuText, { color: theme.colors.onSurface }]}>Notifications</Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
     </ScrollView>
   );

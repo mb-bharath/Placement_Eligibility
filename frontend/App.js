@@ -279,10 +279,20 @@ export default function App() {
         const userData = JSON.parse(user);
         setIsLoggedIn(true);
         setUserRole(userData.role);
+        if (userData.role === 'student' && userData.profileComplete === true) {
+          setInitialNav('StudentApp');
+        } else if (userData.role === 'student') {
+          setInitialNav('StudentProfileGate');
+        } else {
+          setInitialNav('AdminApp');
+        }
+      } else {
+        setInitialNav('Login');
       }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Error checking login status:', error);
+      setInitialNav('Login');
     } finally {
       setBooting(false);
     }
@@ -302,24 +312,23 @@ export default function App() {
     };
   }, [paperTheme.colors.background]);
 
-  if (booting) return null;
+  const [initialNav, setInitialNav] = useState('Login');
 
-  const initialRoute = isLoggedIn
-    ? userRole === 'admin'
-      ? 'AdminApp'
-      : 'StudentApp'
-    : 'Login';
+  if (booting) return null;
 
   return (
     <ThemeContext.Provider value={{ isDark, toggleTheme }}>
       <PaperProvider theme={paperTheme}>
         <NavigationContainer theme={navigationTheme}>
-          <RootStack.Navigator key={initialRoute} initialRouteName={initialRoute}>
+          <RootStack.Navigator key={initialNav} initialRouteName={initialNav}>
             <RootStack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
             <RootStack.Screen name="Register" component={RegisterScreen} options={{ title: 'Register' }} />
 
             <RootStack.Screen name="StudentApp" options={{ headerShown: false }}>
               {() => <StudentTabsScreen role="student" paperTheme={paperTheme} />}
+            </RootStack.Screen>
+            <RootStack.Screen name="StudentProfileGate" options={{ headerShown: false }}>
+              {() => <StudentProfileStackScreen role="student" paperTheme={paperTheme} />}
             </RootStack.Screen>
             <RootStack.Screen name="AdminApp" options={{ headerShown: false }}>
               {() => <AdminTabsScreen role="admin" paperTheme={paperTheme} />}

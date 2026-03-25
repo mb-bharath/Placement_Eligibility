@@ -12,7 +12,7 @@ import {
 import { Button, TextInput, Snackbar, useTheme } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { buildApiUrl } from '../config/api';
+import { buildApiUrl, fetchWithTimeout } from '../config/api';
 
 const LOGO_IMAGE = require('../assets/logo.png');
 
@@ -21,14 +21,13 @@ export default function LoginScreen({ navigation, route }) {
   const [role, setRole] = useState('student');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '' });
 
   const hero = useMemo(
     () => ({
       title: 'Placement Eligibility App',
-      subtitle: 'Apply. Track. Get Placed.',
-      quote: '"Opportunities come to those who are prepared."',
       avatarFallback: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=400',
     }),
     []
@@ -52,16 +51,11 @@ export default function LoginScreen({ navigation, route }) {
 
     setLoading(true);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-      const response = await fetch(buildApiUrl('/auth/login'), {
+      const response = await fetchWithTimeout(buildApiUrl('/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+      }, 20000);
 
       const data = await response.json();
       if (!response.ok || !data.success) {
@@ -76,11 +70,11 @@ export default function LoginScreen({ navigation, route }) {
 
       await AsyncStorage.setItem('token', data.token);
       await AsyncStorage.setItem('user', JSON.stringify(data.user));
-      navigation.replace(role === 'admin' ? 'AdminApp' : 'StudentApp');
+      navigation.replace(role === 'admin' ? 'AdminApp' : 'StudentProfileGate');
     } catch (err) {
       const msg =
         err && err.name === 'AbortError'
-          ? 'Login timed out. Please try again.'
+          ? 'Login timed out. Check the server URL and try again.'
           : 'Unable to connect to server';
       Alert.alert('Error', msg);
     } finally {
@@ -110,8 +104,6 @@ export default function LoginScreen({ navigation, route }) {
           )}
         </View>
         <Text style={[styles.title, { color: theme.colors.onSurface }]}>{hero.title}</Text>
-        <Text style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>{hero.subtitle}</Text>
-        <Text style={[styles.quote, { color: theme.colors.onSurfaceVariant }]}>{hero.quote}</Text>
       </View>
 
       <View style={styles.roleRow}>
@@ -150,9 +142,16 @@ export default function LoginScreen({ navigation, route }) {
         value={password}
         onChangeText={setPassword}
         mode="outlined"
-        secureTextEntry
+        secureTextEntry={!showPassword}
         style={styles.input}
         left={<TextInput.Icon icon="lock" />}
+        right={
+          <TextInput.Icon
+            icon={showPassword ? 'eye' : 'eye-off'}
+            onPress={() => setShowPassword((prev) => !prev)}
+            forceTextInputFocus={false}
+          />
+        }
         outlineColor={theme.colors.outline}
         activeOutlineColor={theme.colors.primary}
         textColor={theme.colors.onSurface}
@@ -175,6 +174,7 @@ export default function LoginScreen({ navigation, route }) {
           </Button>
         )}
       </View>
+
     </View>
   );
 
@@ -285,16 +285,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center',
     marginBottom: 3,
-  },
-  subtitle: {
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  quote: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 10,
   },
   roleRow: {
     flexDirection: 'row',
