@@ -74,7 +74,114 @@ const db = {
   notifications: [],
 };
 
+// OTP store (in-memory). In production, replace with a durable store.
+// Keyed by `${email}|${phone}`
+const otpStore = new Map();
+// Time allowed to enter/verify the OTP code (requested: 60 seconds)
+const OTP_VERIFY_TTL_MS = Number(process.env.OTP_VERIFY_TTL_MS || 60 * 1000);
+// Time allowed to complete registration after OTP verification
+const OTP_VERIFIED_TTL_MS = Number(process.env.OTP_VERIFIED_TTL_MS || 15 * 60 * 1000);
+const OTP_RESEND_COOLDOWN_MS = Number(process.env.OTP_RESEND_COOLDOWN_MS || 30 * 1000); // 30 seconds
+const OTP_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS || 5);
+const OTP_DEBUG = String(process.env.OTP_DEBUG || '').toLowerCase() === 'true' || process.env.NODE_ENV !== 'production';
+
 const nowIso = () => new Date().toISOString();
+
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+const normalizePhone = (value) => String(value || '').replace(/\D/g, '').slice(0, 10);
+
+const isValidNameCapsWithLastInitial = (value) => /^[A-Z]+(?: [A-Z]+)* [A-Z]\.?$/.test(String(value || '').trim());
+const isValidRegisterNumber = (value) => /^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{12}$/.test(String(value || '').trim().toUpperCase());
+const isValidAllowedEmail = (value) => {
+  const email = normalizeEmail(value);
+  if (!email.includes('@')) return false;
+  return email.endsWith('@gmail.com') || email.endsWith('.ac.in');
+};
+const isValidPassword = (value) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(String(value || ''));
+const isValidPhone = (value) => /^\d{10}$/.test(normalizePhone(value));
+
+const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+
+const sendEmailOtp = async (toEmail, otp) => {
+  const host = process.env.SMTP_HOST;
+  const port = process.env.SMTP_PORT;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || user;
+  if (!host || !port || !user || !pass || !from) {
+    console.log(`[OTP][EMAIL][MOCK] to=${toEmail} otp=${otp}`);
+    return { ok: true, mode: 'mock' };
+  }
+
+  let nodemailer;
+  try {
+    // Optional dependency. If not installed, fallback to mock.
+    nodemailer = require('nodemailer');
+  } catch (err) {
+    console.log(`[OTP][EMAIL][MOCK] nodemailer_missing to=${toEmail} otp=${otp}`);
+    return { ok: true, mode: 'mock' };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port: Number(port),
+    secure: Number(port) === 465,
+    auth: { user, pass },
+  });
+
+  await transporter.sendMail({
+    from,
+    to: toEmail,
+    subject: 'Your OTP for Placement Eligibility App',
+    text: `Your OTP is ${otp}. It expires in ${Math.max(30, Math.round(OTP_VERIFY_TTL_MS / 1000))} seconds.`,
+  });
+
+  return { ok: true, mode: 'smtp' };
+};
+
+const sendSmsOtp = async (toPhone, otp) => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_FROM_NUMBER;
+  if (!accountSid || !authToken || !from) {
+    console.log(`[OTP][SMS][MOCK] to=${toPhone} otp=${otp}`);
+    return { ok: true, mode: 'mock' };
+  }
+
+  const https = require('https');
+  const postData = new URLSearchParams({
+    To: `+91${toPhone}`,
+    From: from,
+    Body: `Your OTP is ${otp}. It expires in ${Math.max(30, Math.round(OTP_VERIFY_TTL_MS / 1000))} seconds.`,
+  }).toString();
+
+  const options = {
+    hostname: 'api.twilio.com',
+    path: `/2010-04-01/Accounts/${accountSid}/Messages.json`,
+    method: 'POST',
+    auth: `${accountSid}:${authToken}`,
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(postData),
+    },
+  };
+
+  await new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => (body += chunk));
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) return resolve();
+        return reject(new Error(`Twilio error ${res.statusCode}: ${body}`));
+      });
+    });
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+
+  return { ok: true, mode: 'twilio' };
+};
 
 const seed = () => {
   db.users = [];
@@ -263,12 +370,150 @@ app.get('/api/meta', (req, res) => {
   });
 });
 
+const cleanupOtpStore = () => {
+  const now = Date.now();
+  for (const [key, record] of otpStore.entries()) {
+    if (!record) otpStore.delete(key);
+    else if (record.expiresAtMs && record.expiresAtMs < now) otpStore.delete(key);
+    else if (record.verified && record.verifiedAtMs && now - record.verifiedAtMs > OTP_VERIFIED_TTL_MS) otpStore.delete(key);
+  }
+};
+
+const requestOtpHandler = async (req, res) => {
+  cleanupOtpStore();
+  const { email, phone } = req.body || {};
+  const emailLower = normalizeEmail(email);
+  const phoneNorm = normalizePhone(phone);
+
+  if (!isValidAllowedEmail(emailLower)) {
+    return res.status(400).json({ success: false, message: 'Email must end with @gmail.com or .ac.in' });
+  }
+  if (!isValidPhone(phoneNorm)) {
+    return res.status(400).json({ success: false, message: 'Mobile number must be 10 digits' });
+  }
+
+  if (ADMIN_EMAIL && emailLower === ADMIN_EMAIL) {
+    return res.status(409).json({ success: false, message: 'Email already registered' });
+  }
+  if (db.users.find((u) => u.email.toLowerCase() === emailLower)) {
+    return res.status(409).json({ success: false, message: 'Email already registered' });
+  }
+  if (mongoReady) {
+    const existing = await User.findOne({ email: emailLower }).lean();
+    if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
+  }
+
+  const key = `${emailLower}|${phoneNorm}`;
+  const now = Date.now();
+  const existing = otpStore.get(key);
+  if (existing?.nextSendAtMs && existing.nextSendAtMs > now) {
+    const waitSec = Math.ceil((existing.nextSendAtMs - now) / 1000);
+    return res.status(429).json({ success: false, message: `Please wait ${waitSec}s before requesting OTP again` });
+  }
+
+  const otp = generateOtp();
+  const otpHash = bcrypt.hashSync(otp, 10);
+  otpStore.set(key, {
+    otpHash,
+    createdAtMs: now,
+    expiresAtMs: now + OTP_VERIFY_TTL_MS,
+    attempts: 0,
+    verified: false,
+    verifiedAtMs: null,
+    nextSendAtMs: now + OTP_RESEND_COOLDOWN_MS,
+  });
+
+  try {
+    const [emailResult, smsResult] = await Promise.all([sendEmailOtp(emailLower, otp), sendSmsOtp(phoneNorm, otp)]);
+    return res.json({
+      success: true,
+      delivery: { email: emailResult.mode, sms: smsResult.mode },
+      ...(OTP_DEBUG ? { otp } : {}),
+    });
+  } catch (err) {
+    otpStore.delete(key);
+    return res.status(500).json({ success: false, message: 'Failed to send OTP. Please try again.' });
+  }
+};
+
+const verifyOtpHandler = (req, res) => {
+  cleanupOtpStore();
+  const { email, phone, otp } = req.body || {};
+  const emailLower = normalizeEmail(email);
+  const phoneNorm = normalizePhone(phone);
+  const otpStr = String(otp || '').trim();
+
+  if (!isValidAllowedEmail(emailLower) || !isValidPhone(phoneNorm)) {
+    return res.status(400).json({ success: false, message: 'Invalid email or mobile number' });
+  }
+  if (!/^\d{6}$/.test(otpStr)) {
+    return res.status(400).json({ success: false, message: 'OTP must be 6 digits' });
+  }
+
+  const key = `${emailLower}|${phoneNorm}`;
+  const record = otpStore.get(key);
+  if (!record) {
+    return res.status(404).json({ success: false, message: 'OTP not found. Please request OTP again.' });
+  }
+  if (record.expiresAtMs && record.expiresAtMs < Date.now()) {
+    otpStore.delete(key);
+    return res.status(410).json({ success: false, message: 'OTP expired. Please request OTP again.' });
+  }
+  if (record.attempts >= OTP_MAX_ATTEMPTS) {
+    otpStore.delete(key);
+    return res.status(429).json({ success: false, message: 'Too many attempts. Please request OTP again.' });
+  }
+
+  record.attempts += 1;
+  const ok = bcrypt.compareSync(otpStr, record.otpHash);
+  if (!ok) {
+    otpStore.set(key, record);
+    return res.status(401).json({ success: false, message: 'Invalid OTP' });
+  }
+
+  record.verified = true;
+  record.verifiedAtMs = Date.now();
+  otpStore.set(key, record);
+
+  const otpToken = jwt.sign({ purpose: 'otp', email: emailLower, phone: phoneNorm }, JWT_SECRET, { expiresIn: '15m' });
+  return res.json({ success: true, otpToken });
+};
+
+// Support both base URLs:
+// - http://host:5000/api  -> /api/auth/*
+// - http://host:5000      -> /auth/*
+app.post('/api/auth/request-otp', requestOtpHandler);
+app.post('/auth/request-otp', requestOtpHandler);
+app.post('/api/auth/verify-otp', verifyOtpHandler);
+app.post('/auth/verify-otp', verifyOtpHandler);
+
 app.post('/api/auth/register', async (req, res) => {
-  const { name, registerNumber, email, password } = req.body || {};
-  if (!name || !registerNumber || !email || !password) {
+  const { name, registerNumber, email, password, phone } = req.body || {};
+  if (!name || !registerNumber || !email || !password || !phone) {
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
-  const emailLower = String(email).toLowerCase();
+
+  const emailLower = normalizeEmail(email);
+  const phoneNorm = normalizePhone(phone);
+
+  if (!isValidNameCapsWithLastInitial(name)) {
+    return res.status(400).json({ success: false, message: 'Full name must be uppercase with last initial' });
+  }
+  if (!isValidRegisterNumber(registerNumber)) {
+    return res.status(400).json({ success: false, message: 'Register number must be 12 alphanumeric characters' });
+  }
+  if (!isValidAllowedEmail(emailLower)) {
+    return res.status(400).json({ success: false, message: 'Email must end with @gmail.com or .ac.in' });
+  }
+  if (!isValidPassword(password)) {
+    return res
+      .status(400)
+      .json({ success: false, message: 'Password must be 8+ chars with uppercase, lowercase, number and special char' });
+  }
+  if (!isValidPhone(phoneNorm)) {
+    return res.status(400).json({ success: false, message: 'Mobile number must be 10 digits' });
+  }
+
   if (ADMIN_EMAIL && emailLower === ADMIN_EMAIL) {
     return res.status(409).json({ success: false, message: 'Email already registered' });
   }
@@ -286,7 +531,8 @@ app.post('/api/auth/register', async (req, res) => {
     passwordHash: bcrypt.hashSync(password, 10),
     role: 'student',
     name,
-    registerNumber,
+    registerNumber: String(registerNumber).trim().toUpperCase(),
+    phone: phoneNorm,
     createdAt: nowIso(),
   };
 
@@ -294,15 +540,17 @@ app.post('/api/auth/register', async (req, res) => {
     _id: uuidv4(),
     userId: user.id,
     name,
-    registerNumber,
+    registerNumber: user.registerNumber,
+    degree: '',
     department: 'AI&DS',
     cgpa: 7.0,
     backlogs: 0,
-    phone: '',
+    phone: phoneNorm,
     batch: '',
     historyOfArrears: 0,
     tenthPercentage: 0,
     twelfthPercentage: 0,
+    profileComplete: false,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -326,10 +574,13 @@ app.post('/api/auth/register', async (req, res) => {
       email: user.email,
       role: user.role,
       name: user.name,
+      degree: student.degree,
       registerNumber: user.registerNumber,
+      phone: phoneNorm,
       department: student.department,
       cgpa: student.cgpa,
       backlogs: student.backlogs,
+      profileComplete: student.profileComplete,
     },
   });
 });
@@ -394,25 +645,61 @@ app.get('/api/companies', requireAuth, (req, res) => {
 
 app.post('/api/companies', requireAuth, requireRole('admin'), async (req, res) => {
   const payload = req.body || {};
-  if (!payload.name || payload.minCGPA === undefined || payload.maxBacklogs === undefined || !payload.package) {
-    return res.status(400).json({ success: false, message: 'Missing required fields' });
+  const required = [
+    'name',
+    'minCGPA',
+    'maxBacklogs',
+    'package',
+    'description',
+    'jobRole',
+    'location',
+    'driveDate',
+    'registrationDeadline',
+    'tenthPercentageMin',
+    'twelfthPercentageMin',
+    'eligibleDepartments',
+  ];
+  const missing = required.filter((k) => payload[k] === undefined || payload[k] === null || payload[k] === '');
+  if (missing.length) {
+    return res.status(400).json({ success: false, message: `Missing required fields: ${missing.join(', ')}` });
+  }
+  if (!Array.isArray(payload.eligibleDepartments) || payload.eligibleDepartments.length === 0) {
+    return res.status(400).json({ success: false, message: 'eligibleDepartments must be a non-empty array' });
+  }
+
+  const driveDate = new Date(payload.driveDate);
+  const registrationDeadline = new Date(payload.registrationDeadline);
+  if (Number.isNaN(driveDate.getTime())) {
+    return res.status(400).json({ success: false, message: 'Invalid driveDate' });
+  }
+  if (Number.isNaN(registrationDeadline.getTime())) {
+    return res.status(400).json({ success: false, message: 'Invalid registrationDeadline' });
+  }
+
+  const tenth = Number(payload.tenthPercentageMin);
+  const twelfth = Number(payload.twelfthPercentageMin);
+  if (!Number.isFinite(tenth) || tenth < 0 || tenth > 100) {
+    return res.status(400).json({ success: false, message: 'Invalid tenthPercentageMin' });
+  }
+  if (!Number.isFinite(twelfth) || twelfth < 0 || twelfth > 100) {
+    return res.status(400).json({ success: false, message: 'Invalid twelfthPercentageMin' });
   }
 
   const company = {
     _id: uuidv4(),
-    name: payload.name,
+    name: String(payload.name || '').trim(),
     minCGPA: Number(payload.minCGPA),
     maxBacklogs: Number(payload.maxBacklogs),
-    package: payload.package,
-    eligibleDepartments: payload.eligibleDepartments || departments,
-    description: payload.description || '',
-    jobRole: payload.jobRole || '',
-    location: payload.location || '',
-    driveDate: payload.driveDate || null,
-    registrationDeadline: payload.registrationDeadline || null,
+    package: String(payload.package || '').trim(),
+    eligibleDepartments: payload.eligibleDepartments,
+    description: String(payload.description || '').trim(),
+    jobRole: String(payload.jobRole || '').trim(),
+    location: String(payload.location || '').trim(),
+    driveDate: driveDate.toISOString(),
+    registrationDeadline: registrationDeadline.toISOString(),
     driveStatus: payload.driveStatus || 'open',
-    tenthPercentageMin: payload.tenthPercentageMin ?? null,
-    twelfthPercentageMin: payload.twelfthPercentageMin ?? null,
+    tenthPercentageMin: tenth,
+    twelfthPercentageMin: twelfth,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -463,7 +750,12 @@ app.delete('/api/companies/:id', requireAuth, requireRole('admin'), async (req, 
 app.get('/api/students/profile', requireAuth, requireRole('student'), (req, res) => {
   const student = findStudentByUserId(req.user.id);
   if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
-  return res.json({ success: true, student });
+  const normalized = {
+    ...student,
+    degree: student.degree || '',
+    profileComplete: Boolean(student.profileComplete),
+  };
+  return res.json({ success: true, student: normalized });
 });
 
 app.put('/api/students/profile', requireAuth, requireRole('student'), async (req, res) => {
@@ -474,6 +766,7 @@ app.put('/api/students/profile', requireAuth, requireRole('student'), async (req
     name: payload.name ?? student.name,
     registerNumber: payload.registerNumber ?? student.registerNumber,
     phone: payload.phone ?? student.phone,
+    degree: payload.degree ?? student.degree,
     department: payload.department ?? student.department,
     batch: payload.batch ?? student.batch,
     cgpa: payload.cgpa ?? student.cgpa,
@@ -481,6 +774,7 @@ app.put('/api/students/profile', requireAuth, requireRole('student'), async (req
     historyOfArrears: payload.historyOfArrears ?? student.historyOfArrears,
     tenthPercentage: payload.tenthPercentage ?? student.tenthPercentage,
     twelfthPercentage: payload.twelfthPercentage ?? student.twelfthPercentage,
+    profileComplete: true,
     updatedAt: nowIso(),
   };
   try {
