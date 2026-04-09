@@ -44,6 +44,21 @@ const DEPARTMENTS_BY_DEGREE = {
   ],
 };
 
+const DEPT_ALIAS_MAP = {
+  CSE: 'Computer Science & Engineering',
+  ECE: 'Electronics & Communication Engineering',
+  MECH: 'Mechanical Engineering',
+  EEE: 'Electrical & Electronics Engineering',
+  CIVIL: 'Civil Engineering',
+  IT: 'Information Technology',
+  'AI&DS': 'Artificial Intelligence and Data Science',
+};
+
+const LABEL_TO_CODE = Object.entries(DEPT_ALIAS_MAP).reduce((acc, [code, label]) => {
+  acc[label] = code;
+  return acc;
+}, {});
+
 export default function StudentProfileScreen({ navigation }) {
   const theme = useTheme();
   const [logoutOpen, setLogoutOpen] = useState(false);
@@ -76,6 +91,7 @@ export default function StudentProfileScreen({ navigation }) {
       }
 
       const student = data.student || {};
+      const displayDept = DEPT_ALIAS_MAP[student.department] || student.department || '';
       const profileComplete = !!student.profileComplete;
       setFirstVisit(!profileComplete);
       setUser({
@@ -83,7 +99,7 @@ export default function StudentProfileScreen({ navigation }) {
         registerNumber: student.registerNumber || '',
         phone: student.phone || '',
         degree: student.degree || '',
-        department: student.department || '',
+        department: displayDept,
         batch: student.batch || '',
         cgpa: student.cgpa !== null && student.cgpa !== undefined ? String(student.cgpa) : '',
         backlogs: student.backlogs !== null && student.backlogs !== undefined ? String(student.backlogs) : '',
@@ -98,7 +114,7 @@ export default function StudentProfileScreen({ navigation }) {
         registerNumber: demoStudent.registerNumber,
         phone: '',
         degree: '',
-        department: demoStudent.department,
+        department: DEPT_ALIAS_MAP[demoStudent.department] || demoStudent.department,
         batch: '',
         cgpa: String(demoStudent.cgpa),
         backlogs: String(demoStudent.backlogs),
@@ -164,7 +180,7 @@ export default function StudentProfileScreen({ navigation }) {
         registerNumber: user.registerNumber,
         phone: user.phone,
         degree: user.degree,
-        department: user.department,
+        department: LABEL_TO_CODE[user.department] || user.department,
         batch: user.batch,
         cgpa,
         backlogs,
@@ -186,7 +202,13 @@ export default function StudentProfileScreen({ navigation }) {
 
       const onContinue = firstVisit
         ? () => navigation.replace('StudentApp')
-        : () => navigation.goBack();
+        : () => {
+            if (navigation.canGoBack && navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              navigation.replace('StudentApp');
+            }
+          };
 
       onContinue();
     } catch (error) {

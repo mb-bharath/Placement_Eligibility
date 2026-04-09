@@ -11,6 +11,16 @@ import { apiFetch } from '../config/api';
 import { useFocusEffect } from '@react-navigation/native';
 import { demoCompanies } from '../data/demoData';
 
+const DEPT_ALIAS_MAP = {
+  CSE: 'Computer Science & Engineering',
+  ECE: 'Electronics & Communication Engineering',
+  MECH: 'Mechanical Engineering',
+  EEE: 'Electrical & Electronics Engineering',
+  CIVIL: 'Civil Engineering',
+  IT: 'Information Technology',
+  'AI&DS': 'Artificial Intelligence and Data Science',
+};
+
 export default function CompanyListScreen({ navigation }) {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -69,7 +79,9 @@ export default function CompanyListScreen({ navigation }) {
           <Card.Content>
             <View style={styles.cardHeader}>
               <Text style={styles.companyName}>{company.name}</Text>
-              <Chip style={styles.chip}>{company.package}</Chip>
+              <Chip style={styles.chip} textStyle={styles.chipText}>
+                {company.package}
+              </Chip>
             </View>
 
             <View style={styles.criteriaContainer}>
@@ -88,7 +100,7 @@ export default function CompanyListScreen({ navigation }) {
                 <View style={styles.departmentChips}>
                   {company.eligibleDepartments.map((dept, index) => (
                     <Chip key={index} style={styles.deptChip} textStyle={styles.deptChipText}>
-                      {dept}
+                      {DEPT_ALIAS_MAP[dept] || dept}
                     </Chip>
                   ))}
                 </View>
@@ -153,7 +165,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   chip: {
-    backgroundColor: '#6200ee',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#6200ee',
+  },
+  chipText: {
+    color: '#6200ee',
+    fontWeight: '700',
   },
   criteriaContainer: {
     backgroundColor: '#f9f9f9',

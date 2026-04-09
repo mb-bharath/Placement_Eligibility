@@ -16,7 +16,18 @@ import {
   demoDashboardCounts,
   demoResumeUrl,
   eligibleCompaniesForStudent,
+  demoCompanies,
 } from '../data/demoData';
+
+const DEPT_ALIAS_MAP = {
+  CSE: 'Computer Science & Engineering',
+  ECE: 'Electronics & Communication Engineering',
+  MECH: 'Mechanical Engineering',
+  EEE: 'Electrical & Electronics Engineering',
+  CIVIL: 'Civil Engineering',
+  IT: 'Information Technology',
+  'AI&DS': 'Artificial Intelligence and Data Science',
+};
 
 export default function StudentHomeScreen({ navigation }) {
   const theme = useTheme();
@@ -35,6 +46,7 @@ export default function StudentHomeScreen({ navigation }) {
     resumeCount: 0,
   });
   const [eligibleCompanies, setEligibleCompanies] = useState([]);
+  const [notEligibleCompanies, setNotEligibleCompanies] = useState([]);
 
   useEffect(() => {
     loadUserData();
@@ -60,16 +72,18 @@ export default function StudentHomeScreen({ navigation }) {
 
       if (userData) setUser(JSON.parse(userData));
 
-      const [dash, docs, eligible] = await Promise.all([
+      const [dash, docs, eligible, eligibility] = await Promise.all([
         apiFetch('/students/dashboard'),
         apiFetch('/documents/my-docs'),
         apiFetch('/students/eligible-companies'),
+        apiFetch('/students/eligibility'),
       ]);
 
       const isUnauthorized =
         dash.response.status === 401 ||
         docs.response.status === 401 ||
         eligible.response.status === 401 ||
+        eligibility.response.status === 401 ||
         dash.data?.message === 'Invalid token';
 
       if (isUnauthorized) {
@@ -100,8 +114,29 @@ export default function StudentHomeScreen({ navigation }) {
         });
       }
 
-      if (eligible.response.ok && eligible.data && eligible.data.success) {
-        setEligibleCompanies(eligible.data.companies || []);
+      if (eligibility.response.ok && eligibility.data && eligibility.data.success) {
+        const results = eligibility.data.results || [];
+        const mapCompany = (c) => ({
+          ...c,
+          eligibleDepartments: Array.isArray(c?.eligibleDepartments)
+            ? c.eligibleDepartments.map((d) => DEPT_ALIAS_MAP[d] || d)
+            : [],
+        });
+        setEligibleCompanies(results.filter((r) => r.isEligible).map((r) => mapCompany(r.company)));
+        setNotEligibleCompanies(
+          results
+            .filter((r) => !r.isEligible)
+            .map((r) => ({ ...mapCompany(r.company), reasons: r.reasons || [] }))
+        );
+      } else if (eligible.response.ok && eligible.data && eligible.data.success) {
+        const mapCompany = (c) => ({
+          ...c,
+          eligibleDepartments: Array.isArray(c?.eligibleDepartments)
+            ? c.eligibleDepartments.map((d) => DEPT_ALIAS_MAP[d] || d)
+            : [],
+        });
+        setEligibleCompanies((eligible.data.companies || []).map(mapCompany));
+        setNotEligibleCompanies([]);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -121,7 +156,16 @@ export default function StudentHomeScreen({ navigation }) {
         shortlisted: demoDashboardCounts.shortlisted,
       });
 
-      setEligibleCompanies(eligibleCompaniesForStudent(demoStudent));
+      const mapCompany = (c) => ({
+        ...c,
+        eligibleDepartments: Array.isArray(c?.eligibleDepartments)
+          ? c.eligibleDepartments.map((d) => DEPT_ALIAS_MAP[d] || d)
+          : [],
+      });
+      const demoEligible = eligibleCompaniesForStudent(demoStudent).map(mapCompany);
+      const demoNotEligible = demoCompanies.filter((c) => !eligibleCompaniesForStudent(demoStudent).includes(c)).map(mapCompany);
+      setEligibleCompanies(demoEligible);
+      setNotEligibleCompanies(demoNotEligible);
 
       const storedResumeUrl = await AsyncStorage.getItem('demo_resume_url');
       setDocuments({
@@ -160,6 +204,8 @@ export default function StudentHomeScreen({ navigation }) {
     }
     navigation.navigate('ResumeTab', { screen: 'StudentDocuments' });
   };
+
+  const formatDept = (dept) => DEPT_ALIAS_MAP[dept] || dept;
 
   if (!user) {
     return (
@@ -321,8 +367,13 @@ export default function StudentHomeScreen({ navigation }) {
                   {c.name}
                 </Text>
                 <Text style={[styles.eligibleMeta, { color: theme.colors.onSurfaceVariant }]}>
-                  {c.jobRole || 'Role'} • {c.package || 'Package'}
+                  {c.jobRole || 'Role'} | {c.package || 'Package'}
                 </Text>
+                {Array.isArray(c.eligibleDepartments) && c.eligibleDepartments.length ? (
+                  <Text style={[styles.eligibleMeta, { color: theme.colors.onSurfaceVariant }]}>
+                    {c.eligibleDepartments.map(formatDept).join(', ')}
+                  </Text>
+                ) : null}
               </View>
               <Button
                 mode="outlined"
@@ -336,6 +387,43 @@ export default function StudentHomeScreen({ navigation }) {
               >
                 Apply
               </Button>
+            </View>
+          ))}
+        </Card.Content>
+      </Card>
+
+      <Card style={[styles.eligibleCard, { backgroundColor: theme.colors.surface }]}>
+        <Card.Content>
+          <Text style={[styles.eligibleTitle, { color: theme.colors.onSurface }]}>
+            Not Eligible
+          </Text>
+          {notEligibleCompanies.length === 0 && (
+            <Text style={[styles.eligibleEmpty, { color: theme.colors.onSurfaceVariant }]}>
+              Great! You're eligible for all listed companies.
+            </Text>
+          )}
+          {notEligibleCompanies.map((c) => (
+            <View
+              key={c._id || c.id || c.name}
+              style={[
+                styles.eligibleRow,
+                { borderBottomColor: theme.colors.outlineVariant },
+              ]}
+            >
+              <View style={styles.eligibleInfo}>
+                <Text style={[styles.eligibleName, { color: theme.colors.onSurface }]}>
+                  {c.name}
+                </Text>
+                <Text style={[styles.eligibleMeta, { color: theme.colors.onSurfaceVariant }]}>
+                  {c.jobRole || 'Role'} | {c.package || 'Package'}
+                </Text>
+                {Array.isArray(c.eligibleDepartments) && c.eligibleDepartments.length ? (
+                  <Text style={[styles.eligibleMeta, { color: theme.colors.onSurfaceVariant }]}>
+                    {c.eligibleDepartments.map(formatDept).join(', ')}
+                  </Text>
+                ) : null}
+              </View>
+              <Text style={[styles.ineligibleTag, { color: theme.colors.error }]}>Not Eligible</Text>
             </View>
           ))}
         </Card.Content>
@@ -560,4 +648,8 @@ const styles = StyleSheet.create({
   },
   eligibleStatCard: {},
   notEligibleStatCard: {},
+  ineligibleTag: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });

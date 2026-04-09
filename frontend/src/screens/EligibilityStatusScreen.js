@@ -81,10 +81,18 @@ export default function EligibilityStatusScreen({ navigation }) {
 
       <Button
         mode="contained"
-        onPress={() => navigation.navigate('CompanyList')}
+        onPress={() => navigation.navigate('EligibilityResult', { eligibleOnly: true })}
         style={styles.button}
       >
         View Eligible Companies
+      </Button>
+
+      <Button
+        mode="outlined"
+        onPress={() => navigation.navigate('EligibilityResult', { notEligibleOnly: true })}
+        style={[styles.button, { marginTop: 8 }]}
+      >
+        View Not Eligible Companies
       </Button>
     </ScrollView>
   );

@@ -16,7 +16,19 @@ import {
   computeEligibility,
 } from '../data/demoData';
 
-export default function EligibilityResultScreen() {
+const DEPT_ALIAS_MAP = {
+  CSE: 'Computer Science & Engineering',
+  ECE: 'Electronics & Communication Engineering',
+  MECH: 'Mechanical Engineering',
+  EEE: 'Electrical & Electronics Engineering',
+  CIVIL: 'Civil Engineering',
+  IT: 'Information Technology',
+  'AI&DS': 'Artificial Intelligence and Data Science',
+};
+
+export default function EligibilityResultScreen({ route }) {
+  const eligibleOnly = route?.params?.eligibleOnly || false;
+  const notEligibleOnly = route?.params?.notEligibleOnly || false;
   const [user, setUser] = useState(null);
   const [results, setResults] = useState([]);
 
@@ -35,13 +47,7 @@ export default function EligibilityResultScreen() {
         return;
       }
 
-      const eligibilityResults = (data.results || []).map((r) => ({
-        company: r.company,
-        isEligible: r.isEligible,
-        reasons: r.reasons || [],
-        passedChecks: r.passedChecks || {},
-      }));
-
+      const eligibilityResults = (data.results || []).map((r) => mapResult(r, data.studentProfile));
       setResults(eligibilityResults);
     } catch (error) {
       console.error('Error checking eligibility:', error);
@@ -52,9 +58,44 @@ export default function EligibilityResultScreen() {
         passedChecks: {},
       }));
       setUser(demoStudent);
-      setResults(demoResults);
+      setResults(demoResults.map((r) => mapResult(r, demoStudent)));
     }
   };
+
+  const mapResult = (r, profile) => {
+    const company = r.company || r;
+    const eligibleDepartments = Array.isArray(company.eligibleDepartments)
+      ? company.eligibleDepartments.map((d) => DEPT_ALIAS_MAP[d] || d)
+      : [];
+    const normalizedCompany = { ...company, eligibleDepartments };
+    const derivedReasons = deriveReasons(r.reasons || [], normalizedCompany, profile || user);
+    return {
+      company: normalizedCompany,
+      isEligible: r.isEligible,
+      reasons: derivedReasons,
+      passedChecks: r.passedChecks || {},
+    };
+  };
+
+  const deriveReasons = (reasonsFromApi, company, profile) => {
+    const reasons = [...(reasonsFromApi || [])];
+    if (!profile || reasons.length > 0) return reasons;
+    if (profile.cgpa < company.minCGPA) reasons.push('Low CGPA');
+    if ((profile.backlogs || 0) > (company.maxBacklogs || 0)) reasons.push('Backlogs exceed limit');
+    if (
+      Array.isArray(company.eligibleDepartments) &&
+      !company.eligibleDepartments.includes(profile.department)
+    ) {
+      reasons.push('Not eligible department');
+    }
+    return reasons.length ? reasons : ['Not eligible'];
+  };
+
+  const filteredResults = results.filter((r) => {
+    if (eligibleOnly) return r.isEligible;
+    if (notEligibleOnly) return !r.isEligible;
+    return true;
+  });
 
   return (
     <ScrollView style={styles.container}>
@@ -68,10 +109,39 @@ export default function EligibilityResultScreen() {
       )}
 
       <View style={styles.resultsHeader}>
-        <Text style={styles.resultsTitle}>Eligibility Results</Text>
+        <Text style={styles.resultsTitle}>
+          {eligibleOnly
+            ? 'Eligible Companies'
+            : notEligibleOnly
+              ? 'Not Eligible Companies'
+              : 'Eligibility Results'}
+        </Text>
       </View>
 
-      {results.map((result, index) => (
+      {filteredResults.length === 0 && (
+        <View style={styles.emptyBox}>
+          <MaterialCommunityIcons
+            name={
+              eligibleOnly
+                ? 'check-circle-outline'
+                : notEligibleOnly
+                  ? 'close-circle-outline'
+                  : 'playlist-remove'
+            }
+            size={40}
+            color="#888"
+          />
+          <Text style={styles.emptyText}>
+            {eligibleOnly
+              ? 'No eligible companies yet.'
+              : notEligibleOnly
+                ? 'No not-eligible companies.'
+                : 'No results to show.'}
+          </Text>
+        </View>
+      )}
+
+      {filteredResults.map((result, index) => (
         <Card
           key={index}
           style={[
@@ -81,7 +151,15 @@ export default function EligibilityResultScreen() {
         >
           <Card.Content>
             <View style={styles.cardHeader}>
-              <Text style={styles.companyName}>{result.company.name}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.companyName}>{result.company.name}</Text>
+                <Text style={styles.packageText}>
+                  {result.company.jobRole || 'Role'} | {result.company.package}
+                </Text>
+                <Text style={styles.deptLine}>
+                  {(result.company.eligibleDepartments || []).join(', ')}
+                </Text>
+              </View>
               <Chip
                 style={
                   result.isEligible
@@ -94,16 +172,11 @@ export default function EligibilityResultScreen() {
               </Chip>
             </View>
 
-            <View style={styles.packageContainer}>
-              <Text style={styles.packageText}>Package: {result.company.package}</Text>
-            </View>
-
             {!result.isEligible && result.reasons.length > 0 && (
               <View style={styles.reasonsContainer}>
-                <Text style={styles.reasonsTitle}>Reasons:</Text>
                 {result.reasons.map((reason, idx) => (
                   <Text key={idx} style={styles.reasonText}>
-                    • {reason}
+                    {reason}
                   </Text>
                 ))}
               </View>
@@ -204,6 +277,11 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '600',
   },
+  deptLine: {
+    fontSize: 12,
+    color: '#777',
+    marginTop: 2,
+  },
   reasonsContainer: {
     backgroundColor: '#fff',
     padding: 10,
@@ -218,8 +296,8 @@ const styles = StyleSheet.create({
   },
   reasonText: {
     fontSize: 13,
-    color: '#666',
-    marginBottom: 3,
+    color: '#d32f2f',
+    marginBottom: 2,
   },
   criteriaContainer: {
     backgroundColor: '#fff',

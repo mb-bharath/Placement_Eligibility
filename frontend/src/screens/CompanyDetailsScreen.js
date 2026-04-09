@@ -49,7 +49,11 @@ export default function CompanyDetailsScreen({ route }) {
             <Text style={[styles.title, { color: theme.colors.onSurface }]}>
               {company?.name || 'Company'}
             </Text>
-            {company?.package ? <Chip style={styles.packageChip}>{company.package}</Chip> : null}
+            {company?.package ? (
+              <Chip style={styles.packageChip} textStyle={styles.packageChipText}>
+                {company.package}
+              </Chip>
+            ) : null}
           </View>
 
           {loading && (
@@ -140,7 +144,13 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   packageChip: {
-    backgroundColor: '#6200ee',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#6200ee',
+  },
+  packageChipText: {
+    color: '#6200ee',
+    fontWeight: '700',
   },
   loadingBox: {
     flexDirection: 'row',
@@ -181,4 +191,3 @@ const styles = StyleSheet.create({
     backgroundColor: '#e3f2fd',
   },
 });
-

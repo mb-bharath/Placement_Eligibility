@@ -12,11 +12,67 @@ import { Card, Button, TextInput, Chip, IconButton, ActivityIndicator } from 're
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { buildApiUrl } from '../config/api';
 
+const DEGREE_OPTIONS = [
+  { value: 'BE', label: 'B.E' },
+  { value: 'BTECH', label: 'B.Tech' },
+];
+
+const DEPARTMENTS_BY_DEGREE = {
+  BE: [
+    'Biomedical Engineering',
+    'Civil Engineering',
+    'Computer Science & Design',
+    'Computer Science & Engineering',
+    'Electrical & Electronics Engineering',
+    'Electronics & Communication Engineering',
+    'Electronics & Instrumentation Engineering',
+    'Information Science & Engineering',
+    'Mechanical Engineering',
+    'Mechatronics Engineering',
+  ],
+  BTECH: [
+    'Agricultural Engineering',
+    'Artificial Intelligence and Data Science',
+    'Artificial Intelligence and Machine Learning',
+    'Biotechnology',
+    'Computer Science & Business Systems',
+    'Computer Technology',
+    'Food Technology',
+    'Fashion Technology',
+    'Information Technology',
+    'Textile Technology',
+  ],
+};
+
+const DEPT_ALIAS_MAP = {
+  CSE: 'Computer Science & Engineering',
+  ECE: 'Electronics & Communication Engineering',
+  MECH: 'Mechanical Engineering',
+  EEE: 'Electrical & Electronics Engineering',
+  CIVIL: 'Civil Engineering',
+  IT: 'Information Technology',
+  'AI&DS': 'Artificial Intelligence and Data Science',
+};
+
+const CODE_BY_LABEL = Object.entries(DEPT_ALIAS_MAP).reduce((acc, [code, label]) => {
+  acc[label] = code;
+  return acc;
+}, {});
+
+const mapCompanyForDisplay = (company) => ({
+  ...company,
+  eligibleDepartments: Array.isArray(company?.eligibleDepartments)
+    ? company.eligibleDepartments.map((d) => DEPT_ALIAS_MAP[d] || d)
+    : [],
+});
+
 export default function CompanyManagementScreen() {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [iosPicker, setIosPicker] = useState({ open: false, field: null, value: new Date() });
+  const [editingId, setEditingId] = useState(null);
+  const [degreeFilter, setDegreeFilter] = useState('BE');
   const [newCompany, setNewCompany] = useState({
     name: '',
     minCGPA: '',
@@ -31,6 +87,25 @@ export default function CompanyManagementScreen() {
     tenthPercentageMin: '',
     twelfthPercentageMin: '',
   });
+
+  function resetForm() {
+    setNewCompany({
+      name: '',
+      minCGPA: '',
+      maxBacklogs: '',
+      package: '',
+      eligibleDepartments: [],
+      description: '',
+      jobRole: '',
+      location: '',
+      driveDate: '',
+      registrationDeadline: '',
+      tenthPercentageMin: '',
+      twelfthPercentageMin: '',
+    });
+    setEditingId(null);
+    setShowAddForm(false);
+  }
 
   const DateTimePicker = useMemo(() => {
     try {
@@ -100,7 +175,7 @@ export default function CompanyManagementScreen() {
         throw new Error(data.message || 'Failed to load companies');
       }
 
-      setCompanies(data.companies || []);
+      setCompanies((data.companies || []).map(mapCompanyForDisplay));
     } catch (err) {
       Alert.alert('Error', err.message || 'Unable to load companies');
     } finally {
@@ -112,7 +187,7 @@ export default function CompanyManagementScreen() {
     fetchCompanies();
   }, []);
 
-  const handleAddCompany = () => {
+  const handleSaveCompany = () => {
     const missing = [];
     if (!String(newCompany.name || '').trim()) missing.push('Company Name');
     if (!String(newCompany.minCGPA || '').trim()) missing.push('Minimum CGPA');
@@ -172,7 +247,7 @@ export default function CompanyManagementScreen() {
       minCGPA: parsedMinCgpa,
       maxBacklogs: parsedMaxBacklogs,
       package: newCompany.package.trim(),
-      eligibleDepartments: newCompany.eligibleDepartments,
+      eligibleDepartments: (newCompany.eligibleDepartments || []).map((d) => CODE_BY_LABEL[d] || d),
       description: newCompany.description.trim(),
       jobRole: newCompany.jobRole.trim(),
       location: newCompany.location.trim(),
@@ -186,43 +261,33 @@ export default function CompanyManagementScreen() {
       try {
         const token = await AsyncStorage.getItem('token');
         if (!token) {
-          Alert.alert('Auth Required', 'Please login as admin to add companies.');
+          Alert.alert('Auth Required', 'Please login as admin to add or edit companies.');
           return;
         }
 
-        const response = await fetch(buildApiUrl('/companies'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        });
-        const data = await response.json();
+        const url = editingId ? buildApiUrl(`/companies/${editingId}`) : buildApiUrl('/companies');
+        const method = editingId ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
 
         if (!response.ok || !data.success) {
-          throw new Error(data.message || 'Failed to add company');
+          throw new Error(data.message || (editingId ? 'Failed to update company' : 'Failed to add company'));
         }
 
-        setCompanies((prev) => [data.company, ...prev]);
-        setShowAddForm(false);
-        setNewCompany({
-          name: '',
-          minCGPA: '',
-          maxBacklogs: '',
-          package: '',
-          eligibleDepartments: [],
-          description: '',
-          jobRole: '',
-          location: '',
-          driveDate: '',
-          registrationDeadline: '',
-          tenthPercentageMin: '',
-          twelfthPercentageMin: '',
-        });
-        Alert.alert('Success', 'Company added successfully');
+        // Always refetch to ensure freshest data from backend (handles server transforms)
+        await fetchCompanies();
+        resetForm();
+        Alert.alert('Success', editingId ? 'Company updated successfully' : 'Company added successfully');
       } catch (err) {
-        Alert.alert('Error', err.message || 'Unable to add company');
+        Alert.alert('Error', err.message || 'Unable to save company');
       }
     };
 
@@ -277,7 +342,36 @@ export default function CompanyManagementScreen() {
     setNewCompany({ ...newCompany, eligibleDepartments: depts });
   };
 
-  const departments = ['CSE', 'ECE', 'MECH', 'EEE', 'CIVIL', 'IT', 'AI&DS'];
+  const departments = DEPARTMENTS_BY_DEGREE[degreeFilter] || [];
+
+  const startEditCompany = (company) => {
+    const driveDateStr = company.driveDate ? String(company.driveDate).slice(0, 10) : '';
+    const regDateStr = company.registrationDeadline ? String(company.registrationDeadline).slice(0, 10) : '';
+    const degreeFromDept =
+      (company.eligibleDepartments || []).some((d) => DEPARTMENTS_BY_DEGREE.BTECH.includes(d))
+        ? 'BTECH'
+        : 'BE';
+    setDegreeFilter(degreeFromDept);
+
+    setNewCompany({
+      name: company.name || '',
+      minCGPA: company.minCGPA != null ? String(company.minCGPA) : '',
+      maxBacklogs: company.maxBacklogs != null ? String(company.maxBacklogs) : '',
+      package: company.package || '',
+      eligibleDepartments: Array.isArray(company.eligibleDepartments)
+        ? company.eligibleDepartments.map((d) => DEPT_ALIAS_MAP[d] || d)
+        : [],
+      description: company.description || '',
+      jobRole: company.jobRole || '',
+      location: company.location || '',
+      driveDate: driveDateStr,
+      registrationDeadline: regDateStr,
+      tenthPercentageMin: company.tenthPercentageMin != null ? String(company.tenthPercentageMin) : '',
+      twelfthPercentageMin: company.twelfthPercentageMin != null ? String(company.twelfthPercentageMin) : '',
+    });
+    setEditingId(company._id || company.id || null);
+    setShowAddForm(true);
+  };
 
   return (
     <ScrollView style={styles.container}>
@@ -287,7 +381,13 @@ export default function CompanyManagementScreen() {
         </Text>
         <Button
           mode="contained"
-          onPress={() => setShowAddForm(!showAddForm)}
+          onPress={() => {
+            if (showAddForm) {
+              resetForm();
+            } else {
+              setShowAddForm(true);
+            }
+          }}
           icon={showAddForm ? 'close' : 'plus'}
           style={styles.addButton}
         >
@@ -305,7 +405,7 @@ export default function CompanyManagementScreen() {
       {showAddForm && (
         <Card style={styles.formCard}>
           <Card.Content>
-            <Text style={styles.formTitle}>Add New Company</Text>
+            <Text style={styles.formTitle}>{editingId ? 'Edit Company' : 'Add New Company'}</Text>
 
             <TextInput
               label="Company Name *"
@@ -432,6 +532,19 @@ export default function CompanyManagementScreen() {
             />
 
             <Text style={styles.label}>Eligible Departments: *</Text>
+            <View style={styles.degreeRow}>
+              {DEGREE_OPTIONS.map((opt) => (
+                <Chip
+                  key={opt.value}
+                  selected={degreeFilter === opt.value}
+                  onPress={() => setDegreeFilter(opt.value)}
+                  style={[styles.degreeChip, degreeFilter === opt.value && styles.degreeChipSelected]}
+                  textStyle={degreeFilter === opt.value ? styles.degreeChipTextSelected : styles.degreeChipText}
+                >
+                  {opt.label}
+                </Chip>
+              ))}
+            </View>
             <View style={styles.departmentContainer}>
               {departments.map((dept) => (
                 <Chip
@@ -439,6 +552,7 @@ export default function CompanyManagementScreen() {
                   selected={newCompany.eligibleDepartments.includes(dept)}
                   onPress={() => toggleDepartment(dept)}
                   style={styles.deptChip}
+                  textStyle={styles.deptChipText}
                 >
                   {dept}
                 </Chip>
@@ -447,10 +561,10 @@ export default function CompanyManagementScreen() {
 
             <Button
               mode="contained"
-              onPress={handleAddCompany}
+              onPress={handleSaveCompany}
               style={styles.submitButton}
             >
-              Add Company
+              {editingId ? 'Update Company' : 'Add Company'}
             </Button>
           </Card.Content>
         </Card>
@@ -462,14 +576,24 @@ export default function CompanyManagementScreen() {
             <View style={styles.cardHeader}>
               <View style={styles.cardTitleContainer}>
                 <Text style={styles.companyName}>{company.name}</Text>
-                <Chip style={styles.packageChip}>{company.package}</Chip>
+                <Chip style={styles.packageChip} textStyle={styles.packageChipText}>
+                  {company.package}
+                </Chip>
               </View>
-              <IconButton
-                icon="delete"
-                iconColor="#c62828"
-                size={24}
-                onPress={() => handleDeleteCompany(company._id || company.id)}
-              />
+              <View style={styles.cardActions}>
+                <IconButton
+                  icon="pencil"
+                  iconColor="#6200ee"
+                  size={24}
+                  onPress={() => startEditCompany(company)}
+                />
+                <IconButton
+                  icon="delete"
+                  iconColor="#c62828"
+                  size={24}
+                  onPress={() => handleDeleteCompany(company._id || company.id)}
+                />
+              </View>
             </View>
 
             <View style={styles.criteriaContainer}>
@@ -488,7 +612,7 @@ export default function CompanyManagementScreen() {
                 <View style={styles.deptChipsContainer}>
                   {company.eligibleDepartments.map((dept, index) => (
                     <Chip key={index} style={styles.viewDeptChip} textStyle={styles.chipText}>
-                      {dept}
+                      {DEPT_ALIAS_MAP[dept] || dept}
                     </Chip>
                   ))}
                 </View>
@@ -562,6 +686,10 @@ const styles = StyleSheet.create({
     marginRight: 8,
     marginBottom: 8,
   },
+  deptChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   submitButton: {
     marginTop: 10,
     borderRadius: 10,
@@ -581,7 +709,7 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 15,
   },
   cardTitleContainer: {
@@ -594,8 +722,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   packageChip: {
-    backgroundColor: '#6200ee',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#6200ee',
     alignSelf: 'flex-start',
+  },
+  packageChipText: {
+    color: '#6200ee',
+    fontWeight: '700',
   },
   criteriaContainer: {
     backgroundColor: '#f9f9f9',
@@ -638,5 +772,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     fontStyle: 'italic',
+  },
+  degreeRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  degreeChip: {
+    marginRight: 8,
+    backgroundColor: '#fff',
+    borderColor: '#6200ee',
+    borderWidth: 1,
+  },
+  degreeChipSelected: {
+    backgroundColor: '#6200ee',
+  },
+  degreeChipText: {
+    color: '#6200ee',
+    fontWeight: '700',
+  },
+  degreeChipTextSelected: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });
